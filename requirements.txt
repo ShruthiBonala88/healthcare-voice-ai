@@ -25,7 +25,7 @@ upstash-redis==1.1.0
 redis==5.0.8
 
 # --- Voice: STT / TTS / VAD ---
-webrtcvad-wheels==2.0.14
+webrtcvad-wheels==2.0.10
 deepgram-sdk==3.7.1        # STT provider (swap for your preferred vendor)
 elevenlabs==1.9.0          # TTS provider (swap for your preferred vendor)
 numpy==1.26.4

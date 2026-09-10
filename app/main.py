@@ -1,128 +1,66 @@
 """
-FastAPI application entrypoint for Healthcare Voice AI.
+Voxevia - Hospital AI Voice Agent
+
+Main FastAPI application entry point.
 
 Run locally:
-    uvicorn app.main:app --reload --port 8000
 
-Then expose it publicly, for example:
-    ngrok http 8000
+    python -m uvicorn app.main:app --reload --port 8000
 
-Twilio Voice webhook:
-    https://<your-public-host>/calls/incoming
+Swagger documentation:
+
+    http://127.0.0.1:8000/docs
 """
-
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api.routes_calls import router as calls_router
 from app.api.routes_health import router as health_router
-from app.observability.logging_config import (
-    configure_logging,
-    get_logger,
-)
-
-
-# ---------------------------------------------------------
-# Logging
-# ---------------------------------------------------------
-
-configure_logging()
-logger = get_logger("main")
-
-
-# ---------------------------------------------------------
-# Application Lifecycle
-# ---------------------------------------------------------
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Application startup and shutdown lifecycle.
-    """
-
-    # -------------------------
-    # Startup
-    # -------------------------
-    logger.info("app_startup")
-
-    yield
-
-    # -------------------------
-    # Shutdown
-    # -------------------------
-    logger.info("app_shutdown")
-
-
-# ---------------------------------------------------------
-# FastAPI Application
-# ---------------------------------------------------------
+from app.api.routes_hospital import router as hospital_router
+from app.api.routes_departments import router as departments_router
+from app.api.routes_doctors import router as doctors_router
+from app.api.routes_schedules import router as schedules_router
+from app.api.routes_slots import router as slots_router
+from app.api.routes_patients import router as patients_router
+from app.api.routes_appointments import router as appointments_router
+# =====================================================
+# =======
+# CREATE FASTAPI APPLICATION
+# ============================================================
 
 app = FastAPI(
-    title="Healthcare Voice AI",
+    title="Voxevia Hospital Voice AI Platform",
     description=(
-        "Inbound Healthcare Voice AI system for handling "
-        "patient phone calls, appointments, hospital information, "
-        "and human handoff."
+        "AI voice assistant platform for a hospital."
     ),
     version="0.1.0",
-    lifespan=lifespan,
 )
 
 
-# ---------------------------------------------------------
-# Root Endpoint
-# ---------------------------------------------------------
+# ============================================================
+# ROOT ENDPOINT
+# ============================================================
 
-@app.get("/")
-async def root():
-    """
-    Basic service information.
-    """
-
+@app.get("/", tags=["System"])
+def root():
     return {
         "status": "ok",
-        "service": "Healthcare Voice AI",
+        "service": "Voxevia Hospital Voice AI Platform",
         "version": "0.1.0",
         "mode": "inbound",
     }
 
 
-# ---------------------------------------------------------
-# Routers
-# ---------------------------------------------------------
+# ============================================================
+# REGISTER API ROUTES
+# ============================================================
 
-app.include_router(
-    health_router,
-)
-
-app.include_router(
-    calls_router,
-)
-
-
-# ---------------------------------------------------------
-# Application Info
-# ---------------------------------------------------------
-
-@app.get("/info")
-async def info():
-    """
-    Basic API information.
-    """
-
-    return {
-        "service": "Healthcare Voice AI",
-        "version": "0.1.0",
-        "mode": "inbound",
-        "features": [
-            "Inbound voice calls",
-            "Appointment booking",
-            "Appointment cancellation",
-            "Appointment rescheduling",
-            "Doctor information",
-            "Department information",
-            "Hospital information",
-            "Human handoff",
-        ],
-    }
+app.include_router(health_router)
+app.include_router(calls_router)
+app.include_router(hospital_router)
+app.include_router(departments_router)
+app.include_router(doctors_router)
+app.include_router(schedules_router)
+app.include_router(slots_router)
+app.include_router(patients_router)
+app.include_router(appointments_router)
