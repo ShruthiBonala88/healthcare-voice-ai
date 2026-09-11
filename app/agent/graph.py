@@ -28,10 +28,7 @@ from app.tools.appointment_tools import (
 from app.tools.hospital_tools import hospital_information
 from app.tools.human_handoff import human_handoff
 from app.tools.patient_tools import create_patient, find_patient
-<<<<<<< HEAD
-=======
 from app.tools.identity_tools import verify_patient_identity
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 from app.tools.policy import PolicyError, ToolCallContext, authorize_tool_call
 
 logger = get_logger("agent")
@@ -48,11 +45,7 @@ TOOLS = [
     create_patient,
     hospital_information,
     human_handoff,
-<<<<<<< HEAD
-=======
     verify_patient_identity,
-
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 ]
 
 _llm = get_chat_model().bind_tools(TOOLS)
@@ -76,9 +69,8 @@ def _policy_gate(state: AgentState) -> dict:
     error if any call is blocked, instead of hitting the data layer.
     """
     last = state["messages"][-1]
-<<<<<<< HEAD
     if not isinstance(last, AIMessage) or not last.tool_calls:
-        return {}
+        return {"scratch": state.get("scratch", {})}
 
     blocked_messages = []
     for call in last.tool_calls:
@@ -97,35 +89,17 @@ def _policy_gate(state: AgentState) -> dict:
         return {"messages": blocked_messages}
     return {}
 
-=======
-
-    if not isinstance(last, AIMessage) or not last.tool_calls:
-        return {"scratch": state.get("scratch", {})}
-
     blocked_messages = []
-
     for call in last.tool_calls:
         try:
             authorize_tool_call(
-                ToolCallContext(
-                    state=state,
-                    tool_name=call["name"],
-                    tool_args=call["args"],
-                )
+                ToolCallContext(state=state, tool_name=call["name"], tool_args=call["args"])
             )
         except PolicyError as exc:
-            blocked_messages.append(
-                ToolMessage(
-                    content=f"Blocked: {exc}",
-                    tool_call_id=call["id"],
-                )
-            )
-
+            blocked_messages.append(ToolMessage(content=f"Blocked: {exc}", tool_call_id=call["id"]))
     if blocked_messages:
         return {"messages": blocked_messages}
-
     return {"scratch": state.get("scratch", {})}
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 
 def _route_after_model(state: AgentState) -> str:
     last = state["messages"][-1]
@@ -181,14 +155,11 @@ async def run_agent_turn(
     }
 
     result = await _compiled_graph.ainvoke(graph_state)
-<<<<<<< HEAD
-=======
     if result.get("messages"):
         for message in result["messages"]:
             if hasattr(message, "content") and isinstance(message.content, str):
                 if '"verified": true' in message.content.lower():
                     result["identity_verified"] = True
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 
     final_message = result["messages"][-1]
     reply_text = final_message.content if isinstance(final_message, AIMessage) else ""
