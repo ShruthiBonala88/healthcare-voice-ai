@@ -49,12 +49,16 @@ class Settings(BaseSettings):
 
 
     # ============================================================
-    # SPEECH-TO-TEXT
+    # SPEECH-TO-TEXT (Whisper)
     # ============================================================
 
-    stt_provider: str = "deepgram"
+    stt_provider: str = "whisper"
 
-    deepgram_api_key: str = ""
+    whisper_model: str = "small"
+
+    whisper_device: str = "cpu"
+
+    whisper_compute_type: str = "int8"
 
 
     # ============================================================
