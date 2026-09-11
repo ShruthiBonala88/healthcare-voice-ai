@@ -1,48 +1,14 @@
 """
-<<<<<<< HEAD
 Handles a single Twilio Media Stream WebSocket connection end-to-end:
 
   Twilio audio in -> VAD -> STT -> LangGraph agent -> TTS -> Twilio audio out
 
 Implements barge-in (caller speaking cancels an in-flight agent turn or
 TTS playback), end-of-turn silence detection, and an overall call timeout.
-"""
-import asyncio
-import base64
-import json
-import time
-=======
-Handles a single Twilio Media Stream WebSocket connection.
-
-Flow:
-
-Twilio audio
-    ↓
-VAD
-    ↓
-Collect caller audio
-    ↓
-End-of-turn silence
-    ↓
-Whisper STT
-    ↓
-LangGraph agent
-    ↓
-TTS
-    ↓
-Twilio audio
 
 Database tracking:
-
-Twilio Call
-    ↓
-Conversation
-    ↓
-Messages
-    ↓
-Call Events
+  - Twilio Call -> Conversation -> Messages -> Call Events
 """
-
 import asyncio
 import audioop
 import base64
@@ -52,45 +18,18 @@ import time
 import wave
 
 from pathlib import Path
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.agent.graph import run_agent_turn
 from app.config import get_settings
-<<<<<<< HEAD
-from app.observability.call_events import log_call_event
-from app.observability.logging_config import get_logger
-from app.voice.call_control import transfer_call_to_human
-from app.voice.stt import StreamingSTT
-from app.voice.tts import StreamingTTS
-from app.voice.vad import SilenceTracker, VoiceActivityDetector
-
-logger = get_logger("stream_handler")
-
-
-class CallSessionState:
-    def __init__(self, call_sid: str, caller_number: str):
-        self.call_sid = call_sid
-        self.caller_number = caller_number
-        self.conversation_state: dict = {}  # passed to / returned from LangGraph
-        self.started_at = time.monotonic()
-        self.speaking = False  # True while TTS audio is being played to caller
-        self.barge_in_event = asyncio.Event()
-        self.turn_task: Optional[asyncio.Task] = None  # currently running agent/TTS turn
-
-
-async def handle_media_stream(websocket: WebSocket) -> None:
-    await websocket.accept()
-=======
 from app.data.call_repository import add_message
 from app.observability.call_events import log_call_event
 from app.observability.logging_config import get_logger
 from app.voice.stt import get_stt
 from app.voice.tts import StreamingTTS
 from app.voice.vad import SilenceTracker, VoiceActivityDetector
-
 
 logger = get_logger("stream_handler")
 
@@ -146,10 +85,8 @@ class CallSessionState:
 def _mulaw_to_wav(audio_data: bytes) -> str:
     """
     Convert Twilio 8 kHz μ-law audio into a temporary WAV file.
-
     faster-whisper can then transcribe the WAV file.
     """
-
     pcm_data = audioop.ulaw2lin(audio_data, 2)
 
     temp_file = tempfile.NamedTemporaryFile(
@@ -177,7 +114,6 @@ async def _transcribe_audio(audio_data: bytes) -> str:
     """
     Convert one complete caller utterance into text using Whisper.
     """
-
     if not audio_data:
         return ""
 
@@ -214,11 +150,9 @@ async def _save_message(
 ) -> None:
     """
     Save a conversation message to Supabase.
-
     Database writes are synchronous, so they are executed
     in a worker thread to avoid blocking the live voice pipeline.
     """
-
     try:
         await asyncio.to_thread(
             add_message,
@@ -245,111 +179,12 @@ async def handle_media_stream(websocket: WebSocket) -> None:
     """
     Handle one Twilio Media Stream WebSocket connection.
     """
-
     await websocket.accept()
 
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
     settings = get_settings()
 
     session: Optional[CallSessionState] = None
     stream_sid: Optional[str] = None
-<<<<<<< HEAD
-    vad = VoiceActivityDetector()
-    silence = SilenceTracker()
-    stt = StreamingSTT()
-    tts = StreamingTTS()
-
-    pending_transcript_parts: list[str] = []
-
-    async def on_final_transcript(text: str) -> None:
-        pending_transcript_parts.append(text)
-
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning("malformed_stream_message", raw=raw[:200])
-                continue
-
-            event = msg.get("event")
-
-            if event == "start":
-                call_sid = msg["start"]["callSid"]
-                stream_sid = msg["start"]["streamSid"]
-                caller_number = msg["start"].get("customParameters", {}).get("from", "unknown")
-                session = CallSessionState(call_sid, caller_number)
-                await log_call_event(call_sid, "call_started", {"caller": caller_number})
-                await stt.start(on_final_transcript=on_final_transcript)
-
-            elif event == "media" and session:
-                # Elapsed-time guard
-                if time.monotonic() - session.started_at > settings.max_call_duration_seconds:
-                    await log_call_event(session.call_sid, "call_timeout")
-                    break
-
-                mulaw_chunk = base64.b64decode(msg["media"]["payload"])
-
-                is_speech = vad.is_speech(mulaw_chunk)
-                if is_speech:
-                    silence.update(True)
-                    # Barge-in: caller is talking while we're speaking OR
-                    # still generating a reply. Cancel whichever is active
-                    # and tell Twilio to drop any audio it has buffered.
-                    turn_in_flight = session.turn_task is not None and not session.turn_task.done()
-                    if (session.speaking or turn_in_flight) and not session.barge_in_event.is_set():
-                        session.barge_in_event.set()
-                        await _clear_twilio_playback(websocket, stream_sid)
-                        if turn_in_flight:
-                            session.turn_task.cancel()
-                else:
-                    silence.update(False)
-
-                stt.send_audio(mulaw_chunk)
-
-                if silence.end_of_turn and pending_transcript_parts:
-                    user_text = " ".join(pending_transcript_parts).strip()
-                    pending_transcript_parts.clear()
-                    silence.reset()
-                    session.barge_in_event.clear()
-                    session.turn_task = asyncio.create_task(
-                        _handle_turn(websocket, stream_sid, session, tts, user_text)
-                    )
-
-            elif event == "stop":
-                if session:
-                    await log_call_event(session.call_sid, "call_ended")
-                    if session.turn_task and not session.turn_task.done():
-                        session.turn_task.cancel()
-                    await stt.finish()
-                break
-
-    except WebSocketDisconnect:
-        if session:
-            await log_call_event(session.call_sid, "call_disconnected")
-            if session.turn_task and not session.turn_task.done():
-                session.turn_task.cancel()
-    finally:
-        if session:
-            await stt.finish()
-
-
-async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]) -> None:
-    """
-    Tells Twilio to immediately drop any audio it has already buffered
-    for playback on this stream. Without this, audio queued before a
-    barge-in keeps playing to the caller even after we stop sending
-    new chunks — this "clear" event is Twilio's documented way to flush it.
-    """
-    if not stream_sid:
-        return
-    try:
-        await websocket.send_text(json.dumps({"event": "clear", "streamSid": stream_sid}))
-    except Exception:
-        logger.warning("failed_to_send_clear_event", stream_sid=stream_sid)
-
-=======
 
     # Voice activity detector
     vad = VoiceActivityDetector()
@@ -386,8 +221,7 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
 
                 stream_sid = start_data["streamSid"]
 
-                # Twilio custom parameters are sent by
-                # /calls/incoming.
+                # Twilio custom parameters are sent by /calls/incoming.
                 custom_parameters = start_data.get(
                     "customParameters",
                     {},
@@ -411,25 +245,17 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                 # ------------------------------------------------
 
                 if not conversation_id:
-
                     logger.error(
                         "missing_conversation_id",
                         call_sid=call_sid,
                     )
-
-                    # We do NOT call log_call_event here because
-                    # there is no valid internal call UUID yet.
                     break
 
                 if not call_id:
-
                     logger.error(
                         "missing_call_id",
                         call_sid=call_sid,
                     )
-
-                    # We do NOT call log_call_event here because
-                    # there is no valid internal call UUID yet.
                     break
 
                 # ------------------------------------------------
@@ -480,7 +306,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                 )
 
                 if elapsed > settings.max_call_duration_seconds:
-
                     await log_call_event(
                         session.call_id,
                         "call_timeout",
@@ -495,7 +320,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                         call_id=session.call_id,
                         duration_seconds=int(elapsed),
                     )
-
                     break
 
                 # ------------------------------------------------
@@ -503,13 +327,11 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                 # ------------------------------------------------
 
                 try:
-
                     mulaw_chunk = base64.b64decode(
                         msg["media"]["payload"]
                     )
 
                 except Exception:
-
                     logger.exception(
                         "invalid_media_payload",
                         call_sid=session.call_sid,
@@ -522,41 +344,28 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                             "error": "Invalid media payload",
                         },
                     )
-
                     continue
 
                 # ------------------------------------------------
                 # Voice Activity Detection
                 # ------------------------------------------------
 
-                is_speech = vad.is_speech(
-                    mulaw_chunk
-                )
+                is_speech = vad.is_speech(mulaw_chunk)
 
                 if is_speech:
-
                     # Caller interrupts AI speech.
                     if session.speaking:
-
                         session.barge_in_event.set()
 
                     # Save caller audio.
-                    session.audio_chunks.append(
-                        mulaw_chunk
-                    )
-
+                    session.audio_chunks.append(mulaw_chunk)
                     silence.update(True)
 
                 else:
-
-                    # If we already started collecting an
-                    # utterance, keep silence chunks too so
-                    # the audio remains continuous.
+                    # If we already started collecting an utterance,
+                    # keep silence chunks too so the audio remains continuous.
                     if session.audio_chunks:
-
-                        session.audio_chunks.append(
-                            mulaw_chunk
-                        )
+                        session.audio_chunks.append(mulaw_chunk)
 
                     silence.update(False)
 
@@ -568,7 +377,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                     silence.end_of_turn
                     and session.audio_chunks
                 ):
-
                     audio_data = b"".join(
                         session.audio_chunks
                     )
@@ -587,7 +395,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                     )
 
                     if user_text:
-
                         await _handle_turn(
                             websocket=websocket,
                             stream_sid=stream_sid,
@@ -609,7 +416,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                     # ------------------------------------------------
 
                     if session.audio_chunks:
-
                         audio_data = b"".join(
                             session.audio_chunks
                         )
@@ -621,7 +427,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
                         )
 
                         if user_text:
-
                             await _handle_turn(
                                 websocket=websocket,
                                 stream_sid=stream_sid,
@@ -710,7 +515,6 @@ async def _clear_twilio_playback(websocket: WebSocket, stream_sid: Optional[str]
 # ================================================================
 # HANDLE ONE COMPLETE CALLER TURN
 # ================================================================
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 
 async def _handle_turn(
     websocket: WebSocket,
@@ -719,75 +523,12 @@ async def _handle_turn(
     tts: StreamingTTS,
     user_text: str,
 ) -> None:
-<<<<<<< HEAD
-    await log_call_event(session.call_sid, "user_turn", {"text": user_text})
-
-    try:
-        agent_result = await run_agent_turn(
-            call_sid=session.call_sid,
-            caller_number=session.caller_number,
-            user_text=user_text,
-            state=session.conversation_state,
-        )
-    except asyncio.CancelledError:
-        await log_call_event(session.call_sid, "turn_cancelled_barge_in")
-        raise
-
-    session.conversation_state = agent_result["state"]
-    reply_text = agent_result["reply"]
-    await log_call_event(session.call_sid, "assistant_turn", {"text": reply_text})
-
-    if agent_result.get("handoff_requested"):
-        await log_call_event(session.call_sid, "human_handoff_triggered")
-        # Speak the handoff message if we can, then transfer via Twilio's
-        # REST API. The transfer replaces this call's TwiML, which ends
-        # the Media Stream from Twilio's side — nothing more to do here.
-        try:
-            await _speak(websocket, stream_sid, session, tts, reply_text)
-        except asyncio.CancelledError:
-            pass
-        await asyncio.to_thread(transfer_call_to_human, session.call_sid)
-        return
-
-    try:
-        await _speak(websocket, stream_sid, session, tts, reply_text)
-    except asyncio.CancelledError:
-        await log_call_event(session.call_sid, "tts_cancelled_barge_in")
-        raise
-
-
-async def _speak(
-    websocket: WebSocket,
-    stream_sid: str,
-    session: CallSessionState,
-    tts: StreamingTTS,
-    text: str,
-) -> None:
-    session.speaking = True
-    try:
-        async for audio_chunk in tts.synthesize(text):
-            if session.barge_in_event.is_set():
-                await log_call_event(session.call_sid, "barge_in")
-                break
-=======
     """
     Process one complete caller turn.
 
     Flow:
-
-    Caller speech
-        ↓
-    Whisper text
-        ↓
-    Save user message
-        ↓
-    LangGraph
-        ↓
-    Save assistant message
-        ↓
-    TTS
-        ↓
-    Twilio
+      Caller speech -> Whisper text -> Save user message ->
+      LangGraph -> Save assistant message -> TTS -> Twilio
     """
 
     # ============================================================
@@ -831,14 +572,8 @@ async def _speak(
         state=session.conversation_state,
     )
 
-    # ------------------------------------------------------------
     # Update LangGraph conversation state
-    # ------------------------------------------------------------
-
-    session.conversation_state = (
-        agent_result["state"]
-    )
-
+    session.conversation_state = agent_result["state"]
     reply_text = agent_result["reply"]
 
     # ============================================================
@@ -876,19 +611,13 @@ async def _speak(
     # ============================================================
 
     session.speaking = True
-
     session.barge_in_event.clear()
 
     try:
 
-        async for audio_chunk in tts.synthesize(
-            reply_text
-        ):
+        async for audio_chunk in tts.synthesize(reply_text):
 
-            # ----------------------------------------------------
             # Caller started speaking while AI was talking
-            # ----------------------------------------------------
-
             if session.barge_in_event.is_set():
 
                 await log_call_event(
@@ -904,37 +633,22 @@ async def _speak(
 
                 break
 
-            # ----------------------------------------------------
             # Send audio back to Twilio
-            # ----------------------------------------------------
-
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
             await websocket.send_text(
                 json.dumps(
                     {
                         "event": "media",
                         "streamSid": stream_sid,
-<<<<<<< HEAD
-                        "media": {"payload": base64.b64encode(audio_chunk).decode()},
-                    }
-                )
-            )
-    finally:
-        session.speaking = False
-=======
                         "media": {
-                            "payload": (
-                                base64.b64encode(
-                                    audio_chunk
-                                ).decode("utf-8")
-                            )
+                            "payload": base64.b64encode(
+                                audio_chunk
+                            ).decode("utf-8")
                         },
                     }
                 )
             )
 
     finally:
-
         session.speaking = False
 
     # ============================================================
@@ -953,4 +667,3 @@ async def _speak(
             call_sid=session.call_sid,
             call_id=session.call_id,
         )
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
