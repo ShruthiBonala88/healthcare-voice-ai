@@ -1,119 +1,73 @@
-"""
-Hospital knowledge ingestion.
-
-Takes hospital knowledge text, creates embeddings using
-the configured OpenRouter embedding model, and stores
-documents + chunks in Supabase pgvector.
-"""
-
+from pathlib import Path
 from typing import Any
 
 from app.agent.llm import get_embedding_model
 from app.data.supabase_client import get_supabase
 
 
-def split_text(text: str, chunk_size: int = 500) -> list[str]:
-    """
-    Split hospital knowledge into small text chunks.
-
-    We keep this simple for the first version.
-    Later we can use a more advanced text splitter.
-    """
-
-    text = text.strip()
-
-    if not text:
-        return []
-
+def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
+    """Split text into small chunks for embedding."""
+    words = text.split()
     chunks = []
 
-    for start in range(0, len(text), chunk_size):
-        chunk = text[start:start + chunk_size].strip()
-
-        if chunk:
-            chunks.append(chunk)
+    for i in range(0, len(words), chunk_size):
+        chunks.append(" ".join(words[i:i + chunk_size]))
 
     return chunks
 
 
 def ingest_knowledge(
-    title: str,
-    content: str,
-    source: str = "hospital",
+    text: str,
     metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """
-    Store hospital knowledge and its embeddings.
+) -> int:
+    """Create embeddings and store knowledge chunks."""
 
-    Process:
+    metadata = metadata or {}
 
-    1. Create knowledge document
-    2. Split content into chunks
-    3. Generate embeddings
-    4. Store chunks + vectors
-    """
+    chunks = chunk_text(text)
 
-    if not title.strip():
-        raise ValueError("Knowledge title cannot be empty.")
-
-    if not content.strip():
-        raise ValueError("Knowledge content cannot be empty.")
-
-    supabase = get_supabase()
     embeddings = get_embedding_model()
+    supabase = get_supabase()
 
-    document_response = (
-        supabase
-        .table("knowledge_documents")
-        .insert(
-            {
-                "title": title.strip(),
-                "source": source,
-                "content": content.strip(),
-                "metadata": metadata or {},
-            }
-        )
-        .execute()
-    )
-
-    if not document_response.data:
-        raise RuntimeError(
-            "Failed to create knowledge document."
-        )
-
-    document = document_response.data[0]
-    document_id = document["id"]
-
-    chunks = split_text(content)
-
-    stored_chunks = []
+    rows = []
 
     for chunk in chunks:
+        vector = embeddings.embed_query(chunk)
 
-        embedding = embeddings.embed_query(chunk)
-
-        chunk_response = (
-            supabase
-            .table("knowledge_chunks")
-            .insert(
-                {
-                    "document_id": document_id,
-                    "content": chunk,
-                    "embedding": embedding,
-                    "metadata": metadata or {},
-                }
-            )
-            .execute()
+        rows.append(
+            {
+                "content": chunk,
+                "metadata": metadata,
+                "embedding": vector,
+            }
         )
 
-        if chunk_response.data:
-            stored_chunks.append(
-                chunk_response.data[0]
-            )
+    if rows:
+        supabase.table("knowledge_base").insert(rows).execute()
 
-    return {
-        "success": True,
-        "document_id": document_id,
-        "title": title,
-        "chunks_created": len(stored_chunks),
-    }
+    return len(rows)
+
+
+def ingest_hospital_knowledge() -> int:
+    """Read hospital knowledge file and ingest it into the vector database."""
+
+    knowledge_file = (
+        Path(__file__).resolve().parent.parent
+        / "knowledge"
+        / "hospital_knowledge.txt"
+    )
+
+    text = knowledge_file.read_text(encoding="utf-8")
+
+    return ingest_knowledge(
+        text,
+        metadata={
+            "source": "hospital_knowledge.txt",
+            "type": "hospital_information",
+        },
+    )
+
+
+if __name__ == "__main__":
+    count = ingest_hospital_knowledge()
+    print(f"Successfully ingested {count} knowledge chunks.")
