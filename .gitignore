@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 __pycache__/
 *.py[cod]
 .env
@@ -6,3 +7,14 @@ venv/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+=======
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+
+.pytest_cache/
+.vscode/
+>>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
