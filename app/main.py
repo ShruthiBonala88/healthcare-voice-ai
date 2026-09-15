@@ -23,16 +23,15 @@ from app.api.routes_schedules import router as schedules_router
 from app.api.routes_slots import router as slots_router
 from app.api.routes_patients import router as patients_router
 from app.api.routes_appointments import router as appointments_router
-# =====================================================
-# =======
+
+
+# ============================================================
 # CREATE FASTAPI APPLICATION
 # ============================================================
 
 app = FastAPI(
     title="Voxevia Hospital Voice AI Platform",
-    description=(
-        "AI voice assistant platform for a hospital."
-    ),
+    description="AI voice assistant platform for a hospital.",
     version="0.1.0",
 )
 

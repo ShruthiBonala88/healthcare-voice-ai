@@ -1,3 +1,10 @@
+"""
+Centralized application settings for Voxevia.
+
+Configuration is loaded from environment variables and .env
+using pydantic-settings.
+"""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,7 +24,6 @@ class Settings(BaseSettings):
 
     base_url: str = "http://127.0.0.1:8000"
 
-
     # ============================================================
     # TWILIO
     # ============================================================
@@ -27,7 +33,6 @@ class Settings(BaseSettings):
     twilio_phone_number: str | None = None
 
     twilio_validate_signature: bool = False
-
 
     # ============================================================
     # OPENROUTER
@@ -41,7 +46,6 @@ class Settings(BaseSettings):
 
     openrouter_embedding_model: str | None = None
 
-
     # ============================================================
     # SPEECH-TO-TEXT
     # ============================================================
@@ -54,7 +58,6 @@ class Settings(BaseSettings):
 
     whisper_compute_type: str = "int8"
 
-
     # ============================================================
     # TEXT-TO-SPEECH
     # ============================================================
@@ -64,7 +67,6 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str | None = None
 
     elevenlabs_voice_id: str | None = None
-
 
     # ============================================================
     # SUPABASE
@@ -76,7 +78,6 @@ class Settings(BaseSettings):
 
     supabase_db_url: str | None = None
 
-
     # ============================================================
     # UPSTASH REDIS
     # ============================================================
@@ -85,13 +86,11 @@ class Settings(BaseSettings):
 
     upstash_redis_rest_token: str | None = None
 
-
     # ============================================================
     # HUMAN HANDOFF
     # ============================================================
 
     human_handoff_phone_number: str | None = None
-
 
     # ============================================================
     # CALL SETTINGS
@@ -100,7 +99,6 @@ class Settings(BaseSettings):
     max_call_duration_seconds: int = 1800
 
     rate_limit_per_phone_per_hour: int = 20
-
 
     # ============================================================
     # PYDANTIC SETTINGS CONFIGURATION

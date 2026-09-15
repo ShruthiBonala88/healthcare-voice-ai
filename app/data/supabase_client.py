@@ -1,8 +1,8 @@
 """
-Supabase client.
+Supabase client for Voxevia.
 
 This client is used only by the backend.
-The service role key must never be exposed
+The Supabase service-role key must never be exposed
 to frontend applications.
 """
 
