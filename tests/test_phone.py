@@ -27,3 +27,11 @@ def test_invalid_phone_number():
 
 def test_mask_phone_number():
     assert mask_phone_number("+919876543210") == "+91******3210"
+def test_phone_number_rejects_letters():
+    from app.utils.phone import normalize_phone_number
+
+    try:
+        normalize_phone_number("98765ABCDE0")
+        assert False, "Phone number containing letters should be rejected."
+    except ValueError:
+        pass

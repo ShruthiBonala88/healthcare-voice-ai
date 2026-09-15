@@ -1,40 +1,3 @@
-<<<<<<< HEAD
-
-"""
-LangGraph agent for Healthcare Voice AI.
-
-Flow:
-
-                    ┌──────────────┐
-                    │    AGENT     │
-                    │     LLM      │
-                    └──────┬───────┘
-                           │
-                    Tool call?
-                     /          \
-                   YES           NO
-                    │             │
-                    ▼             ▼
-             ┌─────────────┐    END
-             │ POLICY GATE │
-             └──────┬──────┘
-                    │
-              Authorized?
-               /          \
-             YES           NO
-              │             │
-              ▼             ▼
-          ┌────────┐      AGENT
-          │ TOOLS  │
-          └───┬────┘
-              │
-              ▼
-            AGENT
-
-run_agent_turn() is the main entrypoint used by the
-voice stream handler.
-"""
-=======
 """
 LangGraph agent for Voxevia.
 
@@ -53,9 +16,20 @@ The graph implements a single ReAct-style loop:
     Final response
 
 Every tool call passes through the policy gate before execution.
-"""
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
+Security principles:
+    1. The LLM is not trusted with security-sensitive caller identity.
+    2. The caller phone number comes from trusted call/session state.
+    3. The verified patient_id comes from trusted call/session state.
+    4. The LLM cannot replace the verified patient_id.
+    5. Protected appointment operations require verified identity.
+
+Voxevia is a single-hospital system.
+
+There is no tenant or tenant_id concept.
+"""
+
+import json
 from typing import Any
 
 from langchain_core.messages import (
@@ -64,17 +38,12 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-<<<<<<< HEAD
-
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from app.agent.llm import get_chat_model
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.state import AgentState
-
 from app.observability.logging_config import get_logger
 
 from app.tools.appointment_tools import (
@@ -89,49 +58,23 @@ from app.tools.appointment_tools import (
 
 from app.tools.hospital_tools import hospital_information
 from app.tools.human_handoff import human_handoff
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-from app.tools.patient_tools import create_patient, find_patient
-from app.tools.identity_tools import verify_patient_identity
-from app.tools.policy import PolicyError, ToolCallContext, authorize_tool_call
-=======
-
-from app.tools.patient_tools import (
-    create_patient,
-    find_patient,
-)
-
-from app.tools.identity_tools import (
-    verify_patient_identity,
-)
-
-=======
 from app.tools.identity_tools import verify_patient_identity
 from app.tools.patient_tools import create_patient, find_patient
->>>>>>> 6928a2c (Complete backend security validation and tests)
+
 from app.tools.policy import (
     PolicyError,
     ToolCallContext,
     authorize_tool_call,
 )
 
-<<<<<<< HEAD
->>>>>>> Stashed changes
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
 logger = get_logger("agent")
 
 
-<<<<<<< HEAD
 # ============================================================
 # TOOLS
 # ============================================================
-=======
-# ---------------------------------------------------------------------------
-# Tools available to the LangGraph agent
-# ---------------------------------------------------------------------------
->>>>>>> 6928a2c (Complete backend security validation and tests)
+
 
 TOOLS = [
     get_departments,
@@ -146,52 +89,23 @@ TOOLS = [
     hospital_information,
     human_handoff,
     verify_patient_identity,
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 ]
 
 
 # ============================================================
 # LLM + TOOL NODE
 # ============================================================
-=======
-]
 
-
-# ---------------------------------------------------------------------------
-# LLM + ToolNode
-# ---------------------------------------------------------------------------
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
 _llm = get_chat_model().bind_tools(TOOLS)
 
 _tool_node = ToolNode(TOOLS)
 
 
-<<<<<<< HEAD
 # ============================================================
 # AGENT NODE
 # ============================================================
 
-def _call_model(state: AgentState) -> dict:
-    """
-    Call the LLM.
-
-    The LLM receives:
-        - System prompt
-        - Previous conversation
-        - Latest patient message
-
-    It can either:
-        1. Return normal text
-        2. Request a tool call
-=======
-# ---------------------------------------------------------------------------
-# Agent node
-# ---------------------------------------------------------------------------
 
 def _call_model(state: AgentState) -> dict:
     """
@@ -199,20 +113,14 @@ def _call_model(state: AgentState) -> dict:
 
     The hospital system prompt is inserted automatically when one is
     not already present in the conversation.
->>>>>>> 6928a2c (Complete backend security validation and tests)
     """
 
-    messages = state["messages"]
+    messages = state.get("messages", [])
 
-<<<<<<< HEAD
-    # Add system prompt only once.
     if not any(
         isinstance(message, SystemMessage)
         for message in messages
     ):
-=======
-    if not any(isinstance(message, SystemMessage) for message in messages):
->>>>>>> 6928a2c (Complete backend security validation and tests)
         messages = [
             SystemMessage(
                 content=SYSTEM_PROMPT.format(
@@ -223,7 +131,6 @@ def _call_model(state: AgentState) -> dict:
 
     response = _llm.invoke(messages)
 
-<<<<<<< HEAD
     logger.info(
         "agent_model_called",
         extra={
@@ -234,32 +141,136 @@ def _call_model(state: AgentState) -> dict:
     )
 
     return {
-        "messages": [response]
+        "messages": [response],
     }
+
+
+# ============================================================
+# SECURITY: TRUSTED TOOL ARGUMENTS
+# ============================================================
+
+
+def _secure_tool_arguments(
+    state: AgentState,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Replace security-sensitive LLM-generated arguments with trusted
+    values from the current call/session state.
+
+    The LLM can request a tool, but it must never be trusted to decide
+    which caller or verified patient the operation applies to.
+
+    Trusted values:
+
+        caller_number
+            Comes from the trusted call/session layer.
+
+        patient_id
+            Comes from successful identity verification and is stored
+            in trusted agent state.
+
+    Security-sensitive tools:
+
+        verify_patient_identity
+            caller_phone is always taken from state["caller_number"].
+
+        find_patient
+            patient_id is always taken from state["patient_id"]
+            when patient_id is part of the tool arguments.
+
+        book_appointment
+            patient_id is always taken from state["patient_id"].
+
+        cancel_appointment
+            patient_id is always taken from state["patient_id"].
+
+        reschedule_appointment
+            patient_id is always taken from state["patient_id"].
+
+    Returns:
+        A copy of the tool arguments with security-sensitive values
+        replaced by trusted state values.
+    """
+
+    secured_args = dict(tool_args)
+
+    # ========================================================
+    # TRUSTED CALLER PHONE NUMBER
+    # ========================================================
+
+    if tool_name == "verify_patient_identity":
+        caller_number = state.get("caller_number")
+
+        if not caller_number:
+            raise PolicyError(
+                "Trusted caller phone number is missing from call state."
+            )
+
+        # Never trust caller_phone generated by the LLM.
+        secured_args["caller_phone"] = caller_number
+
+    # ========================================================
+    # TRUSTED VERIFIED PATIENT ID
+    # ========================================================
+
+    if tool_name in {
+        "find_patient",
+        "book_appointment",
+        "cancel_appointment",
+        "reschedule_appointment",
+    }:
+        patient_id = state.get("patient_id")
+
+        if not patient_id:
+            raise PolicyError(
+                "Verified patient ID is missing from call state."
+            )
+
+        # Never trust patient_id generated by the LLM.
+        #
+        # Even if the model tries:
+        #
+        #     patient_id = "another-patient"
+        #
+        # it will be replaced by the verified patient ID.
+        secured_args["patient_id"] = patient_id
+
+    return secured_args
 
 
 # ============================================================
 # POLICY GATE
 # ============================================================
 
+
 def _policy_gate(state: AgentState) -> dict:
     """
-    Check whether requested tools are allowed.
+    Validate every requested tool call before execution.
 
-    IMPORTANT:
-    This function MUST always return at least one state field.
+    Security checks include:
 
-    If tool calls are allowed:
-        return scratch
+    1. Tool must exist in the allow-list.
+    2. Protected operations require verified identity.
+    3. Protected operations require patient_id.
+    4. Security-sensitive arguments are replaced with trusted
+       call/session values.
+    5. Business rules are validated before execution.
 
-    If a tool call is blocked:
-        return ToolMessage(s)
+    Security flow:
 
-    This prevents LangGraph InvalidUpdateError.
+        LLM tool arguments
+                ↓
+        security hardening
+                ↓
+        trusted caller_number
+        trusted patient_id
+                ↓
+        policy authorization
+                ↓
+        tool execution
     """
-<<<<<<< Updated upstream
-    last = state["messages"][-1]
-=======
 
     messages = state.get("messages", [])
 
@@ -269,11 +280,6 @@ def _policy_gate(state: AgentState) -> dict:
         }
 
     last = messages[-1]
->>>>>>> Stashed changes
-
-    # --------------------------------------------------------
-    # No tool request
-    # --------------------------------------------------------
 
     if not isinstance(last, AIMessage):
         return {
@@ -287,55 +293,54 @@ def _policy_gate(state: AgentState) -> dict:
             "scratch": state.get("scratch", {})
         }
 
-    # --------------------------------------------------------
-    # Validate every tool call
-    # --------------------------------------------------------
-=======
-    return {
-        "messages": [response],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Policy gate
-# ---------------------------------------------------------------------------
-
-def _policy_gate(state: AgentState) -> dict:
-    """
-    Validate every tool call before the tool is executed.
-
-    Protected operations such as booking, cancellation, and rescheduling
-    must pass the policy checks first.
-
-    If a tool call is blocked, a ToolMessage is returned to the agent so
-    the LLM can respond safely instead of executing the tool.
-    """
-
-    last = state["messages"][-1]
-
-    if not isinstance(last, AIMessage) or not last.tool_calls:
-        return {}
->>>>>>> 6928a2c (Complete backend security validation and tests)
-
+    authorized_tool_calls = []
     blocked_messages = []
 
     for call in tool_calls:
 
         tool_name = call.get("name")
-        tool_args = call.get("args", {})
+        original_args = call.get("args", {})
         tool_call_id = call.get("id")
 
+        if not isinstance(original_args, dict):
+            original_args = {}
+
         try:
+
+            # ------------------------------------------------
+            # SECURITY HARDENING
+            # ------------------------------------------------
+
+            secured_args = _secure_tool_arguments(
+                state=state,
+                tool_name=tool_name,
+                tool_args=original_args,
+            )
+
+            # ------------------------------------------------
+            # POLICY AUTHORIZATION
+            # ------------------------------------------------
 
             authorize_tool_call(
                 ToolCallContext(
                     state=state,
                     tool_name=tool_name,
-                    tool_args=tool_args,
+                    tool_args=secured_args,
                 )
             )
 
-<<<<<<< HEAD
+            # ------------------------------------------------
+            # TOOL CALL IS AUTHORIZED
+            # ------------------------------------------------
+
+            authorized_call = dict(call)
+
+            authorized_call["args"] = secured_args
+
+            authorized_tool_calls.append(
+                authorized_call
+            )
+
             logger.info(
                 "tool_authorized",
                 extra={
@@ -343,8 +348,6 @@ def _policy_gate(state: AgentState) -> dict:
                 },
             )
 
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
         except PolicyError as exc:
 
             logger.warning(
@@ -362,33 +365,86 @@ def _policy_gate(state: AgentState) -> dict:
                 )
             )
 
-    # --------------------------------------------------------
-    # At least one tool was blocked
-    # --------------------------------------------------------
+        except Exception as exc:
 
-    if blocked_messages:
-<<<<<<< HEAD
+            logger.exception(
+                "tool_security_processing_failed",
+                extra={
+                    "tool_name": tool_name,
+                    "error": str(exc),
+                },
+            )
 
-<<<<<<< Updated upstream
-    return {"scratch": state.get("scratch", {})}
-=======
+            blocked_messages.append(
+                ToolMessage(
+                    content=(
+                        "Blocked: security validation failed."
+                    ),
+                    tool_call_id=tool_call_id,
+                )
+            )
+
+    # ========================================================
+    # BLOCKED CALLS
+    # ========================================================
+
+    if blocked_messages and not authorized_tool_calls:
         return {
-            "messages": blocked_messages
+            "messages": blocked_messages,
         }
->>>>>>> Stashed changes
 
-    # --------------------------------------------------------
-    # All tools authorized
-    # --------------------------------------------------------
+    # ========================================================
+    # AUTHORIZED CALLS
+    # ========================================================
+
+    if authorized_tool_calls:
+
+        secured_ai_message = AIMessage(
+            content=last.content,
+            tool_calls=authorized_tool_calls,
+            additional_kwargs=getattr(
+                last,
+                "additional_kwargs",
+                {},
+            ),
+            response_metadata=getattr(
+                last,
+                "response_metadata",
+                {},
+            ),
+            id=last.id,
+        )
+
+        result = {
+            "messages": [secured_ai_message],
+            "scratch": state.get(
+                "scratch",
+                {},
+            ),
+        }
+
+        # If some calls were blocked, preserve those
+        # security messages as well.
+        if blocked_messages:
+            result["messages"] = (
+                blocked_messages
+                + [secured_ai_message]
+            )
+
+        return result
 
     return {
-        "scratch": state.get("scratch", {})
+        "scratch": state.get(
+            "scratch",
+            {},
+        )
     }
 
 
 # ============================================================
 # ROUTE AFTER AGENT
 # ============================================================
+
 
 def _route_after_model(
     state: AgentState,
@@ -397,7 +453,10 @@ def _route_after_model(
     Decide whether to execute tools or finish the turn.
     """
 
-    messages = state.get("messages", [])
+    messages = state.get(
+        "messages",
+        [],
+    )
 
     if not messages:
         return END
@@ -408,59 +467,40 @@ def _route_after_model(
         isinstance(last, AIMessage)
         and getattr(last, "tool_calls", None)
     ):
-=======
-        return {
-            "messages": blocked_messages,
-        }
-
-    return {}
-
-
-# ---------------------------------------------------------------------------
-# Routing after LLM
-# ---------------------------------------------------------------------------
-
-def _route_after_model(state: AgentState) -> str:
-    """
-    Decide whether the agent should execute tools or finish the turn.
-    """
-
-    last = state["messages"][-1]
-
-    if isinstance(last, AIMessage) and last.tool_calls:
->>>>>>> 6928a2c (Complete backend security validation and tests)
         return "policy_gate"
 
     return END
 
 
-<<<<<<< HEAD
 # ============================================================
 # ROUTE AFTER POLICY
 # ============================================================
+
 
 def _route_after_policy(
     state: AgentState,
 ) -> str:
     """
-    Decide whether policy blocked the tool or
-    the tool can actually execute.
+    Decide whether policy blocked the tool or the tool
+    can actually execute.
     """
 
-    messages = state.get("messages", [])
+    messages = state.get(
+        "messages",
+        [],
+    )
 
     if not messages:
         return "agent"
 
     last = messages[-1]
 
-    # Policy generated a ToolMessage.
-    # Send it back to the LLM so the LLM can explain
-    # the restriction to the caller.
-    if isinstance(last, ToolMessage):
+    if isinstance(
+        last,
+        ToolMessage,
+    ):
         return "agent"
 
-    # Otherwise execute the requested tools.
     return "tools"
 
 
@@ -468,44 +508,16 @@ def _route_after_policy(
 # BUILD GRAPH
 # ============================================================
 
-def build_graph():
-    """
-    Build and compile the LangGraph workflow.
-=======
-# ---------------------------------------------------------------------------
-# Routing after policy gate
-# ---------------------------------------------------------------------------
-
-def _route_after_policy(state: AgentState) -> str:
-    """
-    If the policy gate produced a ToolMessage, return to the agent so it
-    can explain the restriction.
-
-    Otherwise execute the requested tools.
-    """
-
-    last = state["messages"][-1]
-
-    if isinstance(last, ToolMessage):
-        return "agent"
-
-    return "tools"
-
-
-# ---------------------------------------------------------------------------
-# Build graph
-# ---------------------------------------------------------------------------
 
 def build_graph():
     """
     Build and compile the Voxevia LangGraph workflow.
->>>>>>> 6928a2c (Complete backend security validation and tests)
     """
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph(
+        AgentState
+    )
 
-<<<<<<< HEAD
-    # Nodes
     graph.add_node(
         "agent",
         _call_model,
@@ -521,24 +533,14 @@ def build_graph():
         _tool_node,
     )
 
-    # --------------------------------------------------------
-    # Starting point
-    # --------------------------------------------------------
-
-    graph.set_entry_point("agent")
+    graph.set_entry_point(
+        "agent"
+    )
 
     # --------------------------------------------------------
-    # Agent -> Policy Gate OR END
+    # Agent → Policy Gate OR END
     # --------------------------------------------------------
 
-=======
-    graph.add_node("agent", _call_model)
-    graph.add_node("policy_gate", _policy_gate)
-    graph.add_node("tools", _tool_node)
-
-    graph.set_entry_point("agent")
-
->>>>>>> 6928a2c (Complete backend security validation and tests)
     graph.add_conditional_edges(
         "agent",
         _route_after_model,
@@ -548,13 +550,10 @@ def build_graph():
         },
     )
 
-<<<<<<< HEAD
     # --------------------------------------------------------
-    # Policy Gate -> Tools OR Agent
+    # Policy Gate → Tools OR Agent
     # --------------------------------------------------------
 
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
     graph.add_conditional_edges(
         "policy_gate",
         _route_after_policy,
@@ -564,18 +563,14 @@ def build_graph():
         },
     )
 
-<<<<<<< HEAD
     # --------------------------------------------------------
-    # Tools -> Agent
+    # Tools → Agent
     # --------------------------------------------------------
 
     graph.add_edge(
         "tools",
         "agent",
     )
-=======
-    graph.add_edge("tools", "agent")
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
     return graph.compile()
 
@@ -584,18 +579,81 @@ def build_graph():
 # COMPILED GRAPH
 # ============================================================
 
+
 _compiled_graph = build_graph()
 
 
-<<<<<<< HEAD
+# ============================================================
+# IDENTITY RESULT EXTRACTION
+# ============================================================
+
+
+def _extract_identity_result(
+    messages: list[Any],
+) -> dict[str, Any]:
+    """
+    Extract the latest patient identity verification result
+    from ToolMessage objects.
+
+    The identity tool intentionally returns only:
+
+        verified
+        patient_id
+        patient_number
+        reason
+
+    No complete patient record should be copied into agent state.
+    """
+
+    for message in reversed(messages):
+
+        if not isinstance(
+            message,
+            ToolMessage,
+        ):
+            continue
+
+        content = getattr(
+            message,
+            "content",
+            None,
+        )
+
+        if not isinstance(
+            content,
+            str,
+        ):
+            continue
+
+        try:
+            data = json.loads(
+                content
+            )
+
+        except (
+            json.JSONDecodeError,
+            TypeError,
+        ):
+            continue
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            continue
+
+        if "verified" not in data:
+            continue
+
+        return data
+
+    return {}
+
+
 # ============================================================
 # RUN ONE AGENT TURN
 # ============================================================
-=======
-# ---------------------------------------------------------------------------
-# Public agent entrypoint
-# ---------------------------------------------------------------------------
->>>>>>> 6928a2c (Complete backend security validation and tests)
+
 
 async def run_agent_turn(
     call_sid: str,
@@ -604,151 +662,65 @@ async def run_agent_turn(
     state: dict[str, Any],
 ) -> dict[str, Any]:
     """
-<<<<<<< HEAD
-    Run one complete patient conversation turn.
-=======
     Run one complete agent turn.
 
-    The caller's message is appended to the existing conversation state.
-    LangGraph then executes the LLM/tool loop until a final assistant
-    response is produced.
+    The caller's message is appended to the existing conversation
+    state.
 
-    Returns:
-        reply:
-            Final text response for the caller.
+    LangGraph then executes the LLM/tool loop until a final
+    assistant response is produced.
 
-        state:
-            Updated LangGraph state to persist for the next turn.
+    Security:
 
-        handoff_requested:
-            Whether a human handoff was requested during this turn.
+        caller_number
+            Comes from trusted call/session state.
+
+        patient_id
+            Comes from previous successful identity verification.
+
+    The LLM cannot replace either value.
     """
-
-    graph_state: AgentState = {
-        "messages": state.get("messages", [])
-        + [HumanMessage(content=user_text)],
-
-        "call_sid": call_sid,
-        "caller_number": caller_number,
-
-        "patient_id": state.get("patient_id"),
-
-        "identity_verified": state.get(
-            "identity_verified",
-            False,
-        ),
-
-        "handoff_requested": False,
-
-        "scratch": state.get(
-            "scratch",
-            {},
-        ),
-    }
->>>>>>> 6928a2c (Complete backend security validation and tests)
-
-    Example:
-
-        patient:
-            "What departments are available?"
-
-        agent:
-            LLM decides whether hospital knowledge/tool
-            information is required.
-
-        tool:
-            Executes requested tool if authorized.
-
-        agent:
-            Generates final response.
-
-    Returns:
-
-        {
-            "reply": "...",
-            "state": {...},
-            "handoff_requested": False
-        }
-    """
-
-<<<<<<< Updated upstream
-    result = await _compiled_graph.ainvoke(graph_state)
-<<<<<<< HEAD
-    if result.get("messages"):
-        for message in result["messages"]:
-            if hasattr(message, "content") and isinstance(message.content, str):
-                if '"verified": true' in message.content.lower():
-                    result["identity_verified"] = True
-=======
-    # --------------------------------------------------------
-    # Build graph state
-    # --------------------------------------------------------
->>>>>>> Stashed changes
 
     previous_messages = state.get(
         "messages",
         [],
-=======
-
-    # -----------------------------------------------------------------------
-    # Identity verification result handling
-    # -----------------------------------------------------------------------
-    #
-    # The identity tool may return a serialized result containing:
-    #
-    #     "verified": true
-    #
-    # When that happens, preserve the verified state for the next turn.
-    #
-    # This allows a successful identity verification to unlock protected
-    # appointment operations later in the conversation.
-    # -----------------------------------------------------------------------
-
-    if result.get("messages"):
-        for message in result["messages"]:
-            if (
-                hasattr(message, "content")
-                and isinstance(message.content, str)
-                and '"verified": true' in message.content.lower()
-            ):
-                result["identity_verified"] = True
-
-    # -----------------------------------------------------------------------
-    # Extract final response
-    # -----------------------------------------------------------------------
-
-    final_message = result["messages"][-1]
-
-    if isinstance(final_message, AIMessage):
-        reply_text = final_message.content
-    else:
-        reply_text = ""
-
-    # -----------------------------------------------------------------------
-    # Detect human handoff
-    # -----------------------------------------------------------------------
-
-    handoff_requested = any(
-        isinstance(message, ToolMessage)
-        and "handoff_requested" in (message.content or "")
-        for message in result["messages"][-4:]
->>>>>>> 6928a2c (Complete backend security validation and tests)
     )
 
     graph_state: AgentState = {
-        "messages": previous_messages
-        + [
-            HumanMessage(
-                content=user_text
-            )
-        ],
+
+        "messages": (
+            previous_messages
+            + [
+                HumanMessage(
+                    content=user_text,
+                )
+            ]
+        ),
 
         "call_sid": call_sid,
 
+        # ----------------------------------------------------
+        # TRUSTED CALLER NUMBER
+        # ----------------------------------------------------
+        #
+        # This value comes from the call/session layer.
+        # The LLM cannot replace it during identity verification.
+        #
+
         "caller_number": caller_number,
 
+        # ----------------------------------------------------
+        # TRUSTED VERIFIED PATIENT ID
+        # ----------------------------------------------------
+        #
+        # This value comes from previous identity verification.
+        #
+        # If the patient has not yet been verified, this remains
+        # None and protected tools will be blocked by policy.
+        #
+
         "patient_id": state.get(
-            "patient_id"
+            "patient_id",
         ),
 
         "identity_verified": state.get(
@@ -767,98 +739,148 @@ async def run_agent_turn(
         ),
     }
 
-    # --------------------------------------------------------
-    # Run LangGraph
-    # --------------------------------------------------------
-
     logger.info(
         "agent_turn_started",
         extra={
             "call_sid": call_sid,
-            "caller_number": caller_number,
-            "user_text": user_text,
         },
     )
 
     result = await _compiled_graph.ainvoke(
-        graph_state
+        graph_state,
     )
 
-    # --------------------------------------------------------
-    # Preserve identity verification
-    # --------------------------------------------------------
+    result_messages = result.get(
+        "messages",
+        [],
+    )
 
-    if result.get("messages"):
+    # ========================================================
+    # PRESERVE IDENTITY VERIFICATION
+    # ========================================================
 
-        for message in result["messages"]:
+    identity_result = _extract_identity_result(
+        result_messages,
+    )
 
-            content = getattr(
-                message,
-                "content",
-                None,
-            )
+    if identity_result.get(
+        "verified"
+    ) is True:
 
-            if (
-                isinstance(content, str)
-                and '"verified": true'
-                in content.lower()
-            ):
-                result["identity_verified"] = True
+        result[
+            "identity_verified"
+        ] = True
 
-    # --------------------------------------------------------
-    # Find final AI response
-    # --------------------------------------------------------
+        patient_id = identity_result.get(
+            "patient_id"
+        )
+
+        patient_number = identity_result.get(
+            "patient_number"
+        )
+
+        if patient_id:
+
+            result[
+                "patient_id"
+            ] = patient_id
+
+        if patient_number:
+
+            scratch = result.get(
+                "scratch",
+                {},
+            ).copy()
+
+            scratch[
+                "patient_number"
+            ] = patient_number
+
+            result[
+                "scratch"
+            ] = scratch
+
+        logger.info(
+            "patient_identity_verified",
+            extra={
+                "call_sid": call_sid,
+                "patient_id": patient_id,
+            },
+        )
+
+    elif identity_result.get(
+        "verified"
+    ) is False:
+
+        logger.warning(
+            "patient_identity_verification_failed",
+            extra={
+                "call_sid": call_sid,
+                "reason": identity_result.get(
+                    "reason"
+                ),
+            },
+        )
+
+    # ========================================================
+    # FIND FINAL AI RESPONSE
+    # ========================================================
 
     reply_text = ""
 
     for message in reversed(
-        result.get("messages", [])
+        result_messages
     ):
 
-        if isinstance(
+        if not isinstance(
             message,
             AIMessage,
         ):
+            continue
 
-            # Ignore AI messages that only contain
-            # tool calls and have no actual text.
-            if (
-                isinstance(
-                    message.content,
-                    str,
-                )
-                and message.content.strip()
-            ):
+        if (
+            isinstance(
+                message.content,
+                str,
+            )
+            and message.content.strip()
+        ):
 
-                reply_text = (
-                    message.content.strip()
-                )
+            reply_text = (
+                message.content.strip()
+            )
 
-                break
+            break
 
-    # --------------------------------------------------------
-    # Detect human handoff
-    # --------------------------------------------------------
+    # ========================================================
+    # DETECT HUMAN HANDOFF
+    # ========================================================
 
     handoff_requested = any(
+
         isinstance(
             message,
             ToolMessage,
         )
+
         and "handoff_requested"
         in (
             message.content
             or ""
         )
-        for message in result.get(
-            "messages",
-            [],
-        )
+
+        for message in result_messages
     )
 
-    # --------------------------------------------------------
-    # Fallback response
-    # --------------------------------------------------------
+    if handoff_requested:
+
+        result[
+            "handoff_requested"
+        ] = True
+
+    # ========================================================
+    # FALLBACK RESPONSE
+    # ========================================================
 
     if not reply_text:
 
@@ -866,29 +888,42 @@ async def run_agent_turn(
             "Sorry, could you say that again?"
         )
 
-    # --------------------------------------------------------
-    # Logging
-    # --------------------------------------------------------
+    # ========================================================
+    # LOGGING
+    # ========================================================
 
     logger.info(
         "agent_turn_finished",
         extra={
             "call_sid": call_sid,
-            "handoff_requested": handoff_requested,
+
+            "handoff_requested":
+                handoff_requested,
+
+            "identity_verified":
+                result.get(
+                    "identity_verified",
+                    False,
+                ),
+
+            "patient_id_present":
+                bool(
+                    result.get(
+                        "patient_id"
+                    )
+                ),
         },
     )
 
-    # --------------------------------------------------------
-    # Return
-    # --------------------------------------------------------
+    # ========================================================
+    # RETURN
+    # ========================================================
 
     return {
         "reply": reply_text,
-        "state": result,
-        "handoff_requested": handoff_requested,
-<<<<<<< HEAD
-    }
 
-=======
+        "state": result,
+
+        "handoff_requested":
+            handoff_requested,
     }
->>>>>>> 6928a2c (Complete backend security validation and tests)

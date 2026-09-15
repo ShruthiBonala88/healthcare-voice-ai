@@ -1,19 +1,20 @@
 """
 Patient identity verification.
 
-This module verifies a caller against the hospital's
-patients table using:
+This module contains the actual database verification logic.
+
+Verification uses:
     1. Caller phone number
     2. Patient number
     3. Date of birth
 
-Only the minimum information required for verification
-is returned to the agent/application.
+This module does NOT contain LangChain tools.
 """
 
 from typing import Any
 
 from app.data.supabase_client import get_supabase
+from app.utils.phone import normalize_phone_number
 
 
 def verify_patient_identity(
@@ -22,14 +23,17 @@ def verify_patient_identity(
     date_of_birth: str,
 ) -> dict[str, Any]:
     """
-    Verify a patient using caller phone, patient number,
-    and date of birth.
+    Verify a hospital patient using caller phone,
+    patient number, and date of birth.
 
-    Returns:
+    Returns only the minimum information required
+    by the application.
+
+    Example success:
         {
-            "verified": True/False,
+            "verified": True,
             "patient_id": "...",
-            "patient_number": "..."
+            "patient_number": "P0001"
         }
     """
 
@@ -56,6 +60,22 @@ def verify_patient_identity(
             "verified": False,
             "patient_id": None,
             "reason": "Date of birth is required.",
+        }
+
+    # Normalize the caller's phone number before querying
+    # the database so formats such as:
+    # 9876543210
+    # 09876543210
+    # +91 9876543210
+    # +91-9876543210
+    # are converted to the same canonical format.
+    try:
+        caller_phone = normalize_phone_number(caller_phone)
+    except ValueError:
+        return {
+            "verified": False,
+            "patient_id": None,
+            "reason": "Invalid caller phone number.",
         }
 
     supabase = get_supabase()

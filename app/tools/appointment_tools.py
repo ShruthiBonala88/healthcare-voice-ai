@@ -2,6 +2,7 @@
 Appointment-related tools for the hospital voice agent.
 
 These tools provide:
+
 - Department lookup
 - Doctor lookup
 - Doctor details
@@ -11,7 +12,12 @@ These tools provide:
 - Appointment rescheduling
 
 Redis is used as a short-lived distributed lock for appointment slots.
+
 The database RPC is the final source of truth for atomic booking.
+
+Security:
+- Protected appointment operations require the verified patient_id.
+- Appointment cancellation and rescheduling verify appointment ownership.
 """
 
 from contextlib import contextmanager
@@ -39,13 +45,9 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
     PostgreSQL provides the final transaction-level correctness
     through the atomic RPC.
     """
-<<<<<<< HEAD
-=======
-
     if not slot_id:
         raise ValueError("slot_id is required.")
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
     redis = get_redis()
     key = lock_key(f"slot:{slot_id}")
 
@@ -63,13 +65,6 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
 
     try:
         yield
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
     finally:
         redis.delete(key)
 
@@ -232,7 +227,6 @@ def book_appointment(
         raise ValueError("slot_id is required.")
 
     with _slot_lock(slot_id):
-
         supabase = get_supabase()
 
         response = supabase.rpc(
@@ -251,10 +245,7 @@ def book_appointment(
 
     appointment = response.data
 
-<<<<<<< HEAD
     # Supabase RPC may return either a dict or a list.
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
     if isinstance(appointment, list):
         appointment = appointment[0]
 
@@ -272,13 +263,25 @@ def book_appointment(
 @tool
 def cancel_appointment(
     appointment_id: str,
+    patient_id: str,
 ) -> dict[str, Any]:
     """
-    Cancel an existing appointment.
+    Cancel an appointment belonging to the verified patient.
+
+    Security:
+        The appointment must belong to patient_id.
+
+    The patient_id must come from the trusted,
+    already-verified caller session.
     """
     if not appointment_id:
         raise ValueError(
             "appointment_id is required."
+        )
+
+    if not patient_id:
+        raise ValueError(
+            "patient_id is required."
         )
 
     supabase = get_supabase()
@@ -291,13 +294,17 @@ def cancel_appointment(
             }
         )
         .eq("id", appointment_id)
+        .eq("patient_id", patient_id)
         .execute()
     )
 
     if not response.data:
         return {
             "success": False,
-            "reason": "Appointment not found.",
+            "reason": (
+                "Appointment not found or does not belong "
+                "to the verified patient."
+            ),
         }
 
     return {
@@ -315,9 +322,13 @@ def cancel_appointment(
 def reschedule_appointment(
     appointment_id: str,
     new_slot_id: str,
+    patient_id: str,
 ) -> dict[str, Any]:
     """
-    Reschedule an appointment to another available slot.
+    Reschedule an appointment belonging to the verified patient.
+
+    Security:
+        The appointment must belong to patient_id.
 
     The new slot is protected by the Redis lock.
     """
@@ -331,8 +342,12 @@ def reschedule_appointment(
             "new_slot_id is required."
         )
 
-    with _slot_lock(new_slot_id):
+    if not patient_id:
+        raise ValueError(
+            "patient_id is required."
+        )
 
+    with _slot_lock(new_slot_id):
         supabase = get_supabase()
 
         # ----------------------------------------------------
@@ -366,11 +381,17 @@ def reschedule_appointment(
         # ----------------------------------------------------
         # Get existing appointment
         # ----------------------------------------------------
+        #
+        # IMPORTANT:
+        # The patient_id condition prevents one verified
+        # patient from modifying another patient's appointment.
+        #
 
         appointment_response = (
             supabase.table("appointments")
             .select("*")
             .eq("id", appointment_id)
+            .eq("patient_id", patient_id)
             .limit(1)
             .execute()
         )
@@ -380,7 +401,10 @@ def reschedule_appointment(
         if not appointments:
             return {
                 "success": False,
-                "reason": "Appointment not found.",
+                "reason": (
+                    "Appointment not found or does not belong "
+                    "to the verified patient."
+                ),
             }
 
         appointment = appointments[0]
@@ -402,6 +426,7 @@ def reschedule_appointment(
                 }
             )
             .eq("id", appointment_id)
+            .eq("patient_id", patient_id)
             .execute()
         )
 
@@ -422,6 +447,7 @@ def reschedule_appointment(
                 }
             )
             .eq("id", new_slot_id)
+            .eq("status", "available")
             .execute()
         )
 

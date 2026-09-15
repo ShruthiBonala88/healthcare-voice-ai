@@ -1,24 +1,7 @@
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/health",
-    tags=["Health"],
-)
-
-
-@router.get("")
-async def health_check():
-    return {
-        "status": "healthy"
-=======
-=======
 """
 Health check routes for Voxevia.
 """
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
@@ -42,8 +25,4 @@ async def health():
         "status": "ok",
         "env": settings.app_env,
         "time": datetime.now(timezone.utc).isoformat(),
-<<<<<<< HEAD
->>>>>>> Stashed changes
-=======
->>>>>>> 6928a2c (Complete backend security validation and tests)
     }

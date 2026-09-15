@@ -1,9 +1,5 @@
 """
-<<<<<<< HEAD
-Handles a single Twilio Media Stream WebSocket connection.
-=======
 Twilio Media Stream handler for Voxevia.
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
 Flow:
 
@@ -26,12 +22,12 @@ TTS
 Twilio audio
 
 This module also handles:
+
 - call session state
 - call/conversation tracking
 - barge-in
 - maximum call duration
 - malformed media messages
-- human handoff
 """
 
 import asyncio
@@ -41,7 +37,6 @@ import json
 import tempfile
 import time
 import wave
-
 from pathlib import Path
 from typing import Optional
 
@@ -52,7 +47,6 @@ from app.config import get_settings
 from app.data.call_repository import add_message
 from app.observability.call_events import log_call_event
 from app.observability.logging_config import get_logger
-from app.voice.call_control import transfer_call_to_human
 from app.voice.stt import get_stt
 from app.voice.tts import StreamingTTS
 from app.voice.vad import SilenceTracker, VoiceActivityDetector
@@ -102,14 +96,10 @@ class CallSessionState:
         # Caller interruption event
         self.barge_in_event = asyncio.Event()
 
-<<<<<<< HEAD
-        # μ-law audio chunks for current caller utterance
-=======
         # Currently running agent/TTS turn
         self.turn_task: Optional[asyncio.Task] = None
 
-        # Stores mu-law audio chunks for one caller utterance
->>>>>>> 6928a2c (Complete backend security validation and tests)
+        # μ-law audio chunks for current caller utterance
         self.audio_chunks: list[bytes] = []
 
 
@@ -120,7 +110,7 @@ class CallSessionState:
 
 def _mulaw_to_wav(audio_data: bytes) -> str:
     """
-    Convert Twilio 8 kHz mu-law audio into a temporary WAV file.
+    Convert Twilio 8 kHz μ-law audio into a temporary WAV file.
 
     Whisper can then transcribe the WAV file.
     """
@@ -165,13 +155,8 @@ async def _transcribe_audio(audio_data: bytes) -> str:
     try:
         stt = get_stt()
 
-<<<<<<< HEAD
-        # Whisper is blocking, so run it outside
-        # the asyncio event loop.
-=======
         # Whisper transcription is blocking.
         # Run it outside the asyncio event loop.
->>>>>>> 6928a2c (Complete backend security validation and tests)
         text = await asyncio.to_thread(
             stt.transcribe,
             audio_path,
@@ -227,6 +212,7 @@ async def _save_message(
 # CLEAR TWILIO PLAYBACK
 # ================================================================
 
+
 async def _clear_twilio_playback(
     websocket: WebSocket,
     stream_sid: Optional[str],
@@ -274,11 +260,7 @@ async def handle_media_stream(websocket: WebSocket) -> None:
     session: Optional[CallSessionState] = None
     stream_sid: Optional[str] = None
 
-<<<<<<< Updated upstream
-    # Voice activity detector
-=======
     # Voice Activity Detector
->>>>>>> Stashed changes
     vad = VoiceActivityDetector()
 
     # End-of-turn silence detector
@@ -293,16 +275,12 @@ async def handle_media_stream(websocket: WebSocket) -> None:
         # ========================================================
 
         while True:
-
             raw = await websocket.receive_text()
 
-<<<<<<< HEAD
-=======
             # ----------------------------------------------------
             # Parse Twilio message
             # ----------------------------------------------------
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
             try:
                 msg = json.loads(raw)
 
@@ -320,7 +298,6 @@ async def handle_media_stream(websocket: WebSocket) -> None:
             # ====================================================
 
             if event == "start":
-
                 start_data = msg.get("start", {})
 
                 call_sid = start_data.get("callSid")
@@ -361,21 +338,17 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                 # ------------------------------------------------
 
                 if not conversation_id:
-
                     logger.error(
                         "missing_conversation_id",
                         call_sid=call_sid,
                     )
-
                     break
 
                 if not call_id:
-
                     logger.error(
                         "missing_call_id",
                         call_sid=call_sid,
                     )
-
                     break
 
                 # ------------------------------------------------
@@ -429,14 +402,15 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                     await log_call_event(
                         session.call_id,
-                        "call_timeout",
+                        "call_completed",
                         {
+                            "reason": "max_duration",
                             "duration_seconds": int(elapsed),
                         },
                     )
 
                     logger.warning(
-                        "call_timeout",
+                        "call_max_duration_reached",
                         call_sid=session.call_sid,
                         call_id=session.call_id,
                         duration_seconds=int(elapsed),
@@ -445,12 +419,11 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                     break
 
                 # ------------------------------------------------
-                # Decode Twilio mu-law audio
+                # Decode Twilio μ-law audio
                 # ------------------------------------------------
 
                 try:
                     media = msg.get("media", {})
-
                     payload = media.get("payload")
 
                     if not payload:
@@ -465,8 +438,10 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                         validate=True,
                     )
 
-                except Exception:
+                    if not mulaw_chunk:
+                        continue
 
+                except Exception:
                     logger.exception(
                         "invalid_media_payload",
                         call_sid=session.call_sid,
@@ -492,13 +467,15 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                     )
 
                 except Exception:
-
                     logger.exception(
                         "vad_processing_failed",
                         call_sid=session.call_sid,
                     )
-
                     continue
+
+                # ------------------------------------------------
+                # Caller is speaking
+                # ------------------------------------------------
 
                 if is_speech:
 
@@ -511,12 +488,23 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                             stream_sid,
                         )
 
+                        # Stop the currently running AI/TTS turn.
+                        if (
+                            session.turn_task
+                            and not session.turn_task.done()
+                        ):
+                            session.turn_task.cancel()
+
                     # Save caller audio
                     session.audio_chunks.append(
                         mulaw_chunk,
                     )
 
                     silence.update(True)
+
+                # ------------------------------------------------
+                # Silence
+                # ------------------------------------------------
 
                 else:
 
@@ -556,25 +544,18 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                     if user_text:
 
-<<<<<<< HEAD
-                        # ------------------------------------------------
-                        # Handle AI turn
-                        # ------------------------------------------------
-
-                        try:
-
-                            await _handle_turn(
-=======
                         # Cancel any previous turn before starting
                         # a new caller turn.
                         if (
                             session.turn_task
                             and not session.turn_task.done()
                         ):
+
                             session.turn_task.cancel()
 
                             try:
                                 await session.turn_task
+
                             except asyncio.CancelledError:
                                 pass
 
@@ -582,25 +563,13 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                         session.turn_task = asyncio.create_task(
                             _handle_turn(
->>>>>>> 6928a2c (Complete backend security validation and tests)
                                 websocket=websocket,
                                 stream_sid=stream_sid,
                                 session=session,
                                 tts=tts,
                                 user_text=user_text,
                             )
-<<<<<<< HEAD
-
-                        except asyncio.CancelledError:
-
-                            logger.info(
-                                "turn_cancelled",
-                                call_sid=session.call_sid,
-                                call_id=session.call_id,
-                            )
-=======
                         )
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
             # ====================================================
             # CALL STOP
@@ -609,6 +578,23 @@ async def handle_media_stream(websocket: WebSocket) -> None:
             elif event == "stop":
 
                 if session:
+
+                    # ------------------------------------------------
+                    # Cancel any active AI turn
+                    # ------------------------------------------------
+
+                    if (
+                        session.turn_task
+                        and not session.turn_task.done()
+                    ):
+
+                        session.turn_task.cancel()
+
+                        try:
+                            await session.turn_task
+
+                        except asyncio.CancelledError:
+                            pass
 
                     # ------------------------------------------------
                     # Process remaining audio
@@ -663,13 +649,6 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                         call_id=session.call_id,
                         duration_seconds=duration_seconds,
                     )
-
-                    # Cancel active turn if still running.
-                    if (
-                        session.turn_task
-                        and not session.turn_task.done()
-                    ):
-                        session.turn_task.cancel()
 
                 break
 
@@ -737,10 +716,7 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 # ================================================================
 # HANDLE ONE COMPLETE CALLER TURN
 # ================================================================
-<<<<<<< HEAD
-=======
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
 
 async def _handle_turn(
     websocket: WebSocket,
@@ -804,14 +780,11 @@ async def _handle_turn(
 
     try:
 
-<<<<<<< HEAD
-=======
         await log_call_event(
             session.call_id,
             "agent_started",
         )
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
         agent_result = await run_agent_turn(
             call_sid=session.call_sid,
             caller_number=session.caller_number,
@@ -821,15 +794,10 @@ async def _handle_turn(
 
     except asyncio.CancelledError:
 
-        await log_call_event(
-            session.call_id,
-<<<<<<< HEAD
-            "turn_cancelled_barge_in",
-=======
-            "call_failed",
-            {
-                "reason": "agent_turn_cancelled",
-            },
+        logger.info(
+            "agent_turn_cancelled",
+            call_sid=session.call_sid,
+            call_id=session.call_id,
         )
 
         raise
@@ -848,7 +816,6 @@ async def _handle_turn(
             {
                 "stage": "agent",
             },
->>>>>>> 6928a2c (Complete backend security validation and tests)
         )
 
         raise
@@ -858,7 +825,8 @@ async def _handle_turn(
     # ------------------------------------------------------------
 
     session.conversation_state = (
-        agent_result.get("state", {})
+        agent_result.get("state")
+        or {}
     )
 
     reply_text = (
@@ -867,11 +835,13 @@ async def _handle_turn(
     ).strip()
 
     if not reply_text:
+
         logger.warning(
             "empty_agent_reply",
             call_sid=session.call_sid,
             call_id=session.call_id,
         )
+
         return
 
     # ============================================================
@@ -943,33 +913,26 @@ async def _handle_turn(
             # Send audio to Twilio
             # ----------------------------------------------------
 
-<<<<<<< HEAD
-=======
             if not stream_sid:
+
                 logger.warning(
                     "missing_stream_sid_for_tts",
                     call_sid=session.call_sid,
                 )
+
                 break
 
->>>>>>> 6928a2c (Complete backend security validation and tests)
             await websocket.send_text(
                 json.dumps(
                     {
                         "event": "media",
                         "streamSid": stream_sid,
                         "media": {
-<<<<<<< HEAD
-                            "payload": base64.b64encode(
-                                audio_chunk
-                            ).decode("utf-8")
-=======
                             "payload": (
                                 base64.b64encode(
-                                    audio_chunk
+                                    audio_chunk,
                                 ).decode("utf-8")
                             ),
->>>>>>> 6928a2c (Complete backend security validation and tests)
                         },
                     }
                 )
@@ -981,28 +944,7 @@ async def _handle_turn(
             "tts_turn_cancelled",
             call_sid=session.call_sid,
             call_id=session.call_id,
-<<<<<<< Updated upstream
         )
-<<<<<<< HEAD
-=======
-        )
-
-        try:
-
-            await asyncio.to_thread(
-                transfer_call_to_human,
-                session.call_sid,
-            )
-
-        except Exception:
-
-            logger.exception(
-                "human_handoff_failed",
-                call_sid=session.call_sid,
-                call_id=session.call_id,
-            )
->>>>>>> Stashed changes
-=======
 
         raise
 
@@ -1027,4 +969,3 @@ async def _handle_turn(
     finally:
 
         session.speaking = False
->>>>>>> 6928a2c (Complete backend security validation and tests)

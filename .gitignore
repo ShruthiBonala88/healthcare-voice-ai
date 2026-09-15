@@ -1,46 +1,36 @@
-<<<<<<< HEAD
-.venv/
-__pycache__/
-*.pyc
-=======
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
 
-# Virtual environments
+# Virtual environment
 .venv/
 venv/
+env/
 
-# Environment / secrets
->>>>>>> 6928a2c (Complete backend security validation and tests)
+# Environment variables
 .env
-.env.*
-!.env.example
-
-# Python packages
-*.egg-info/
 
 # Testing
 .pytest_cache/
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-.vscode/
-=======
-.vscode/
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
+.coverage
+htmlcov/
 
-.venv311/
-app_backup/
->>>>>>> Stashed changes
-=======
-
-# VS Code
+# IDE
 .vscode/
+.idea/
 
-# OS files
+# OS
 .DS_Store
+Thumbs.db
 
 # Logs
 *.log
-logs/
->>>>>>> 6928a2c (Complete backend security validation and tests)
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Whisper / ML model cache
+models/
