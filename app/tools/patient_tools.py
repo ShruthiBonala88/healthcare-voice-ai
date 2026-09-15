@@ -1,40 +1,23 @@
 """
-<<<<<<< HEAD
-Patient lookup / creation tools, exposed to the LangGraph agent via
-@tool decorators from langchain_core.
-"""
-=======
 Patient tools for the LangGraph agent.
 
-These tools keep the interface expected by M2,
-while using the actual M3 Supabase patients schema.
+These tools use the actual M3 Supabase patients schema.
+
+Security:
+- Existing patient lookup is protected by the policy layer.
+- Only minimum necessary patient fields are returned.
+- New patient creation validates required information.
 """
 
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 from typing import Optional
 
 from langchain_core.tools import tool
 
 from app.data.supabase_client import get_supabase
+from app.utils.phone import normalize_phone_number
 
 
 @tool
-<<<<<<< HEAD
-def find_patient(phone_number: str, last_name: Optional[str] = None) -> dict:
-    """
-    Look up a patient by phone number (and optionally last name to
-    disambiguate). Returns patient record or {"found": False}.
-    """
-    supabase = get_supabase()
-    query = supabase.table("patients").select("*").eq("phone_number", phone_number)
-    if last_name:
-        query = query.eq("last_name", last_name)
-    result = query.execute()
-
-    if not result.data:
-        return {"found": False}
-    return {"found": True, "patient": result.data[0]}
-=======
 def find_patient(
     phone_number: str,
     last_name: Optional[str] = None,
@@ -42,24 +25,59 @@ def find_patient(
     """
     Find an existing patient by phone number.
 
-    The agent uses the argument name phone_number,
-    but the database column is called phone.
+    This tool should only be called after patient identity
+    authorization has been handled by the policy layer.
+
+    The argument name is phone_number while the database
+    column is called phone.
     """
 
+    # -----------------------------------------------------
+    # Validate phone number
+    # -----------------------------------------------------
+
+    if not phone_number or not phone_number.strip():
+        raise ValueError("phone_number is required.")
+
+    normalized_phone = normalize_phone_number(phone_number)
+
+    # -----------------------------------------------------
+    # Supabase
+    # -----------------------------------------------------
+
     supabase = get_supabase()
+
+    # -----------------------------------------------------
+    # Minimum necessary fields
+    # -----------------------------------------------------
+    #
+    # Do NOT use:
+    #
+    #     .select("*")
+    #
+    # because the agent does not need every patient field.
+    #
+    # -----------------------------------------------------
 
     response = (
         supabase
         .table("patients")
-        .select("*")
-        .eq("phone", phone_number)
+        .select(
+            "id, patient_number, full_name, phone"
+        )
+        .eq("phone", normalized_phone)
         .limit(10)
         .execute()
     )
 
     patients = response.data or []
 
+    # -----------------------------------------------------
+    # Optional last-name filtering
+    # -----------------------------------------------------
+
     if last_name:
+
         last_name_lower = last_name.strip().lower()
 
         patients = [
@@ -71,18 +89,30 @@ def find_patient(
             .endswith(last_name_lower)
         ]
 
+    # -----------------------------------------------------
+    # Patient not found
+    # -----------------------------------------------------
+
     if not patients:
         return {
             "found": False,
         }
 
+    # -----------------------------------------------------
+    # Return minimum necessary information
+    # -----------------------------------------------------
+
     patient = patients[0]
 
     return {
         "found": True,
-        "patient": patient,
+        "patient": {
+            "id": patient.get("id"),
+            "patient_number": patient.get("patient_number"),
+            "full_name": patient.get("full_name"),
+            "phone": patient.get("phone"),
+        },
     }
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
 
 
 @tool
@@ -94,40 +124,59 @@ def create_patient(
     email: Optional[str] = None,
 ) -> dict:
     """
-<<<<<<< HEAD
-    Create a new patient record. Use only after confirming the caller is
-    not already an existing patient (via find_patient).
-    """
-    supabase = get_supabase()
-    record = {
-        "first_name": first_name,
-        "last_name": last_name,
-        "phone_number": phone_number,
-        "date_of_birth": date_of_birth,
-        "email": email,
-    }
-    result = supabase.table("patients").insert(record).execute()
-    return {"patient": result.data[0] if result.data else record}
-=======
     Create a new patient.
 
-    The agent provides first_name and last_name,
-    while the database stores the complete name
-    in the full_name column.
+    This operation is allowed during initial registration,
+    but required fields are validated before database insertion.
     """
 
-    supabase = get_supabase()
+    # -----------------------------------------------------
+    # Validate first name
+    # -----------------------------------------------------
+
+    if not first_name or not first_name.strip():
+        raise ValueError("first_name is required.")
+
+    # -----------------------------------------------------
+    # Validate last name
+    # -----------------------------------------------------
+
+    if not last_name or not last_name.strip():
+        raise ValueError("last_name is required.")
+
+    # -----------------------------------------------------
+    # Validate phone
+    # -----------------------------------------------------
+
+    if not phone_number or not phone_number.strip():
+        raise ValueError("phone_number is required.")
+
+    normalized_phone = normalize_phone_number(phone_number)
+
+    # -----------------------------------------------------
+    # Build full name
+    # -----------------------------------------------------
 
     full_name = (
         f"{first_name.strip()} {last_name.strip()}"
     ).strip()
 
+    # -----------------------------------------------------
+    # Build database record
+    # -----------------------------------------------------
+
     record = {
         "full_name": full_name,
-        "phone": phone_number,
+        "phone": normalized_phone,
         "date_of_birth": date_of_birth,
         "email": email,
     }
+
+    # -----------------------------------------------------
+    # Insert patient
+    # -----------------------------------------------------
+
+    supabase = get_supabase()
 
     response = (
         supabase
@@ -136,14 +185,28 @@ def create_patient(
         .execute()
     )
 
+    # -----------------------------------------------------
+    # Insert failed
+    # -----------------------------------------------------
+
     if not response.data:
         return {
             "created": False,
             "error": "Patient could not be created.",
         }
 
+    # -----------------------------------------------------
+    # Return minimum necessary information
+    # -----------------------------------------------------
+
+    patient = response.data[0]
+
     return {
         "created": True,
-        "patient": response.data[0],
+        "patient": {
+            "id": patient.get("id"),
+            "patient_number": patient.get("patient_number"),
+            "full_name": patient.get("full_name"),
+            "phone": patient.get("phone"),
+        },
     }
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0

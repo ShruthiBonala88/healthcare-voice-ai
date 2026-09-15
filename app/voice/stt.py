@@ -1,6 +1,10 @@
 """
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 Voxevia Speech-to-Text
+=======
+Voxevia Speech-to-Text.
+>>>>>>> 6928a2c (Complete backend security validation and tests)
 
 Uses faster-whisper for speech recognition.
 
@@ -22,11 +26,16 @@ from pathlib import Path
 from faster_whisper import WhisperModel
 
 from app.config import get_settings
+from app.observability.logging_config import get_logger
+
+
+logger = get_logger("stt")
 
 
 class WhisperSTT:
     """
     Speech-to-text engine using faster-whisper.
+<<<<<<< HEAD
 =======
 Streaming Speech-to-Text.
 
@@ -75,11 +84,23 @@ class StreamingSTT:
 
         await stt.finish()
 >>>>>>> Stashed changes
+=======
+>>>>>>> 6928a2c (Complete backend security validation and tests)
     """
 
     def __init__(self):
         settings = get_settings()
+<<<<<<< HEAD
 <<<<<<< Updated upstream
+=======
+
+        logger.info(
+            "whisper_model_loading",
+            model=settings.whisper_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+        )
+>>>>>>> 6928a2c (Complete backend security validation and tests)
 
         self.model = WhisperModel(
             settings.whisper_model,
@@ -87,10 +108,18 @@ class StreamingSTT:
             compute_type=settings.whisper_compute_type,
         )
 
+        logger.info(
+            "whisper_model_loaded",
+            model=settings.whisper_model,
+        )
+
     def transcribe(self, audio_path: str) -> str:
         """
         Convert an audio file into text.
         """
+
+        if not audio_path or not audio_path.strip():
+            raise ValueError("audio_path is required.")
 
         path = Path(audio_path)
 
@@ -119,7 +148,8 @@ def get_stt() -> WhisperSTT:
     """
     Return one reusable Whisper STT instance.
 
-    Loading the model is expensive, so we load it only once.
+    Loading the Whisper model is expensive,
+    so the model is loaded only once.
     """
 
     global _stt_instance
@@ -127,6 +157,7 @@ def get_stt() -> WhisperSTT:
     if _stt_instance is None:
         _stt_instance = WhisperSTT()
 
+<<<<<<< HEAD
     return _stt_instance
 =======
 
@@ -216,3 +247,6 @@ def get_stt() -> WhisperSTT:
 def get_stt() -> StreamingSTT:
     return StreamingSTT()
 >>>>>>> Stashed changes
+=======
+    return _stt_instance
+>>>>>>> 6928a2c (Complete backend security validation and tests)

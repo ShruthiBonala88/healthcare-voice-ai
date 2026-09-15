@@ -27,6 +27,7 @@ from app.data.supabase_client import get_supabase
 # REDIS SLOT LOCK
 # ============================================================
 
+
 @contextmanager
 def _slot_lock(slot_id: str, ttl_seconds: int = 15):
     """
@@ -38,6 +39,13 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
     PostgreSQL provides the final transaction-level correctness
     through the atomic RPC.
     """
+<<<<<<< HEAD
+=======
+
+    if not slot_id:
+        raise ValueError("slot_id is required.")
+
+>>>>>>> 6928a2c (Complete backend security validation and tests)
     redis = get_redis()
     key = lock_key(f"slot:{slot_id}")
 
@@ -55,10 +63,13 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
 
     try:
         yield
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 
 =======
 >>>>>>> Stashed changes
+=======
+>>>>>>> 6928a2c (Complete backend security validation and tests)
     finally:
         redis.delete(key)
 
@@ -67,10 +78,11 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
 # DEPARTMENT TOOLS
 # ============================================================
 
+
 @tool
 def get_departments() -> list[dict[str, Any]]:
     """
-    Return all active hospital departments.
+    Return all hospital departments.
     """
     supabase = get_supabase()
 
@@ -88,8 +100,11 @@ def get_departments() -> list[dict[str, Any]]:
 # DOCTOR TOOLS
 # ============================================================
 
+
 @tool
-def get_doctors(department_id: str | None = None) -> list[dict[str, Any]]:
+def get_doctors(
+    department_id: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Return doctors.
 
@@ -113,7 +128,9 @@ def get_doctors(department_id: str | None = None) -> list[dict[str, Any]]:
 
 
 @tool
-def get_doctor_details(doctor_id: str) -> dict[str, Any]:
+def get_doctor_details(
+    doctor_id: str,
+) -> dict[str, Any]:
     """
     Return details for one doctor.
     """
@@ -147,6 +164,7 @@ def get_doctor_details(doctor_id: str) -> dict[str, Any]:
 # ============================================================
 # AVAILABLE SLOT TOOL
 # ============================================================
+
 
 @tool
 def get_available_slots(
@@ -184,6 +202,7 @@ def get_available_slots(
 # ATOMIC APPOINTMENT BOOKING
 # ============================================================
 
+
 @tool
 def book_appointment(
     patient_id: str,
@@ -212,17 +231,9 @@ def book_appointment(
     if not slot_id:
         raise ValueError("slot_id is required.")
 
-    # --------------------------------------------------------
-    # Redis lock
-    # --------------------------------------------------------
-
     with _slot_lock(slot_id):
 
         supabase = get_supabase()
-
-        # ----------------------------------------------------
-        # PostgreSQL atomic transaction
-        # ----------------------------------------------------
 
         response = supabase.rpc(
             "book_appointment_atomic",
@@ -240,7 +251,10 @@ def book_appointment(
 
     appointment = response.data
 
+<<<<<<< HEAD
     # Supabase RPC may return either a dict or a list.
+=======
+>>>>>>> 6928a2c (Complete backend security validation and tests)
     if isinstance(appointment, list):
         appointment = appointment[0]
 
@@ -253,6 +267,7 @@ def book_appointment(
 # ============================================================
 # CANCEL APPOINTMENT
 # ============================================================
+
 
 @tool
 def cancel_appointment(
@@ -294,6 +309,7 @@ def cancel_appointment(
 # ============================================================
 # RESCHEDULE APPOINTMENT
 # ============================================================
+
 
 @tool
 def reschedule_appointment(

@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from app.agent.llm import get_chat_model
 from app.agent.rag import format_context_for_prompt
 
@@ -20,6 +22,7 @@ def local_retrieve(query: str, k: int = 1):
     return LOCAL_KNOWLEDGE[:k]
 
 
+@pytest.mark.asyncio
 async def test_rag_llm():
     query = "What are the hospital visiting hours?"
 
@@ -54,9 +57,11 @@ Do not invent any information.
     print(response.content)
 
     assert response.content
+
     answer = response.content.replace("\u202f", " ")
 
     assert "9 AM" in answer or "8 PM" in answer
+
     print("\n========== RAG + LLM TEST ==========")
     print("RAG + LLM TEST PASSED")
 
