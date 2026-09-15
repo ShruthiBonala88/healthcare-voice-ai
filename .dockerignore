@@ -1,11 +1,9 @@
-@"
 .env
 .env.*
 !.env.example
 
 .venv/
 venv/
-
 __pycache__/
 *.py[cod]
 
@@ -21,4 +19,3 @@ __pycache__/
 tests/
 
 *.log
-"@ | Set-Content .dockerignore
