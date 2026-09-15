@@ -55,10 +55,6 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
 
     try:
         yield
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
     finally:
         redis.delete(key)
 

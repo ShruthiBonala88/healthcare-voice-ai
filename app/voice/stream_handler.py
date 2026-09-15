@@ -247,11 +247,7 @@ async def handle_media_stream(websocket: WebSocket) -> None:
     session: Optional[CallSessionState] = None
     stream_sid: Optional[str] = None
 
-<<<<<<< Updated upstream
-    # Voice activity detector
-=======
     # Voice Activity Detector
->>>>>>> Stashed changes
     vad = VoiceActivityDetector()
 
     # End-of-turn silence detector
@@ -816,9 +812,6 @@ async def _handle_turn(
             "human_handoff_triggered",
             call_sid=session.call_sid,
             call_id=session.call_id,
-<<<<<<< Updated upstream
-        )
-=======
         )
 
         try:
@@ -835,4 +828,3 @@ async def _handle_turn(
                 call_sid=session.call_sid,
                 call_id=session.call_id,
             )
->>>>>>> Stashed changes

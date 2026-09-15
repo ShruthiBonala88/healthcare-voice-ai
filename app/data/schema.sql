@@ -448,8 +448,4 @@ as $$
     where kc.embedding is not null
     order by kc.embedding <=> query_embedding
     limit match_count;
-<<<<<<< Updated upstream
 $$;
-=======
-$$;
->>>>>>> Stashed changes

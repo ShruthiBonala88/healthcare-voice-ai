@@ -1,15 +1,4 @@
 """
-<<<<<<< Updated upstream
-Twilio entrypoints:
-  POST /calls/incoming    -> TwiML that opens a Media Stream to our WS endpoint
-  WS   /calls/stream      -> the live audio stream, handled by voice/stream_handler.py
-
-The inbound call is also registered in the database so that
-conversations and calls can be tracked in Supabase.
-"""
-
-from fastapi import APIRouter, Request, WebSocket
-=======
 Twilio entrypoints.
 
 POST /calls/incoming
@@ -27,32 +16,21 @@ settings.twilio_validate_signature is enabled.
 """
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket
->>>>>>> Stashed changes
 from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from app.config import get_settings
 from app.data.call_repository import create_call, create_conversation
-<<<<<<< Updated upstream
-from app.observability.logging_config import get_logger
-from app.voice.stream_handler import handle_media_stream
-
-
-=======
 from app.observability.call_events import log_call_event
 from app.observability.logging_config import get_logger
 from app.voice.stream_handler import handle_media_stream
 
 
->>>>>>> Stashed changes
 router = APIRouter()
 logger = get_logger("routes_calls")
 
 
-<<<<<<< Updated upstream
-def _validate_twilio_signature(request: Request, body: bytes) -> bool:
-=======
 def _public_url(request: Request) -> str:
     """
     Reconstruct the public URL that Twilio actually called.
@@ -92,7 +70,6 @@ async def _validate_twilio_signature(request: Request) -> bool:
     Twilio signs the public URL plus the submitted form parameters.
     """
 
->>>>>>> Stashed changes
     settings = get_settings()
 
     # Signature validation can be disabled during local development.
@@ -124,8 +101,6 @@ async def _validate_twilio_signature(request: Request) -> bool:
         form,
         signature,
     )
-<<<<<<< Updated upstream
-=======
 
     if not is_valid:
         logger.warning(
@@ -144,7 +119,6 @@ async def _validate_twilio_signature(request: Request) -> bool:
         )
 
     return is_valid
->>>>>>> Stashed changes
 
 
 @router.post("/calls/incoming")
@@ -364,8 +338,6 @@ async def call_stream(websocket: WebSocket):
 
 
 def _ws_host(base_url: str) -> str:
-<<<<<<< Updated upstream
-=======
     """
     Convert the configured base URL into a hostname.
 
@@ -376,7 +348,6 @@ def _ws_host(base_url: str) -> str:
         example.ngrok.app
     """
 
->>>>>>> Stashed changes
     return (
         base_url
         .replace("https://", "")

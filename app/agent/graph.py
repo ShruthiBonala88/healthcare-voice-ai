@@ -64,11 +64,6 @@ from app.tools.appointment_tools import (
 
 from app.tools.hospital_tools import hospital_information
 from app.tools.human_handoff import human_handoff
-<<<<<<< Updated upstream
-from app.tools.patient_tools import create_patient, find_patient
-from app.tools.identity_tools import verify_patient_identity
-from app.tools.policy import PolicyError, ToolCallContext, authorize_tool_call
-=======
 
 from app.tools.patient_tools import (
     create_patient,
@@ -85,7 +80,6 @@ from app.tools.policy import (
     authorize_tool_call,
 )
 
->>>>>>> Stashed changes
 
 logger = get_logger("agent")
 
@@ -107,10 +101,6 @@ TOOLS = [
     hospital_information,
     human_handoff,
     verify_patient_identity,
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 ]
 
 
@@ -191,9 +181,6 @@ def _policy_gate(state: AgentState) -> dict:
 
     This prevents LangGraph InvalidUpdateError.
     """
-<<<<<<< Updated upstream
-    last = state["messages"][-1]
-=======
 
     messages = state.get("messages", [])
 
@@ -203,7 +190,6 @@ def _policy_gate(state: AgentState) -> dict:
         }
 
     last = messages[-1]
->>>>>>> Stashed changes
 
     # --------------------------------------------------------
     # No tool request
@@ -273,13 +259,9 @@ def _policy_gate(state: AgentState) -> dict:
 
     if blocked_messages:
 
-<<<<<<< Updated upstream
-    return {"scratch": state.get("scratch", {})}
-=======
         return {
             "messages": blocked_messages
         }
->>>>>>> Stashed changes
 
     # --------------------------------------------------------
     # All tools authorized
@@ -461,18 +443,9 @@ async def run_agent_turn(
         }
     """
 
-<<<<<<< Updated upstream
-    result = await _compiled_graph.ainvoke(graph_state)
-    if result.get("messages"):
-        for message in result["messages"]:
-            if hasattr(message, "content") and isinstance(message.content, str):
-                if '"verified": true' in message.content.lower():
-                    result["identity_verified"] = True
-=======
     # --------------------------------------------------------
     # Build graph state
     # --------------------------------------------------------
->>>>>>> Stashed changes
 
     previous_messages = state.get(
         "messages",
