@@ -35,12 +35,10 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
     Redis prevents multiple application workers from attempting
     the same slot at exactly the same time.
 
-    PostgreSQL still provides the actual transaction-level
-    correctness through the atomic RPC.
+    PostgreSQL provides the final transaction-level correctness
+    through the atomic RPC.
     """
-
     redis = get_redis()
-
     key = lock_key(f"slot:{slot_id}")
 
     acquired = redis.set(
@@ -57,7 +55,10 @@ def _slot_lock(slot_id: str, ttl_seconds: int = 15):
 
     try:
         yield
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
     finally:
         redis.delete(key)
 
@@ -71,7 +72,6 @@ def get_departments() -> list[dict[str, Any]]:
     """
     Return all active hospital departments.
     """
-
     supabase = get_supabase()
 
     response = (
@@ -96,7 +96,6 @@ def get_doctors(department_id: str | None = None) -> list[dict[str, Any]]:
     If department_id is supplied, only doctors belonging
     to that department are returned.
     """
-
     supabase = get_supabase()
 
     query = (
@@ -118,7 +117,6 @@ def get_doctor_details(doctor_id: str) -> dict[str, Any]:
     """
     Return details for one doctor.
     """
-
     if not doctor_id:
         raise ValueError("doctor_id is required.")
 
@@ -160,7 +158,6 @@ def get_available_slots(
 
     slot_date should be YYYY-MM-DD when supplied.
     """
-
     if not doctor_id:
         raise ValueError("doctor_id is required.")
 
@@ -198,24 +195,17 @@ def book_appointment(
     """
     Atomically book an appointment.
 
-    The PostgreSQL function:
+    The PostgreSQL function book_appointment_atomic performs:
 
-        book_appointment_atomic
-
-    performs the following operations inside one transaction:
-
-        1. Locks the appointment slot.
-        2. Checks that the slot exists.
-        3. Checks that the slot is still available.
-        4. Creates the appointment.
-        5. Marks the slot as booked.
-
-    If any operation fails, PostgreSQL rolls back the transaction.
+    1. Locks the appointment slot.
+    2. Checks that the slot exists.
+    3. Checks that the slot is still available.
+    4. Creates the appointment.
+    5. Marks the slot as booked.
 
     Redis provides an additional short-lived application-level lock.
     PostgreSQL remains the final source of truth.
     """
-
     if not patient_id:
         raise ValueError("patient_id is required.")
 
@@ -246,21 +236,11 @@ def book_appointment(
         ).execute()
 
     if not response.data:
-        raise RuntimeError(
-            "Appointment booking failed."
-        )
+        raise RuntimeError("Appointment booking failed.")
 
     appointment = response.data
 
-    # Depending on the Supabase client response,
-    # the RPC result may be represented as either:
-    #
-    #   dict
-    #
-    # or:
-    #
-    #   list[dict]
-    #
+    # Supabase RPC may return either a dict or a list.
     if isinstance(appointment, list):
         appointment = appointment[0]
 
@@ -281,7 +261,6 @@ def cancel_appointment(
     """
     Cancel an existing appointment.
     """
-
     if not appointment_id:
         raise ValueError(
             "appointment_id is required."
@@ -325,19 +304,7 @@ def reschedule_appointment(
     Reschedule an appointment to another available slot.
 
     The new slot is protected by the Redis lock.
-
-    NOTE:
-    Full rescheduling should eventually use a PostgreSQL
-    transaction/RPC similar to atomic booking so that:
-        old appointment
-        old slot
-        new slot
-
-    are changed atomically.
-
-    For now this function performs the basic operation.
     """
-
     if not appointment_id:
         raise ValueError(
             "appointment_id is required."
@@ -401,7 +368,6 @@ def reschedule_appointment(
             }
 
         appointment = appointments[0]
-
         old_slot_id = appointment.get("slot_id")
 
         # ----------------------------------------------------

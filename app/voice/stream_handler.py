@@ -48,6 +48,7 @@ from app.config import get_settings
 from app.data.call_repository import add_message
 from app.observability.call_events import log_call_event
 from app.observability.logging_config import get_logger
+from app.voice.call_control import transfer_call_to_human
 from app.voice.stt import get_stt
 from app.voice.tts import StreamingTTS
 from app.voice.vad import SilenceTracker, VoiceActivityDetector
@@ -87,16 +88,16 @@ class CallSessionState:
         # LangGraph conversation state
         self.conversation_state: dict = {}
 
-        # Used for maximum call duration
+        # Maximum call duration timer
         self.started_at = time.monotonic()
 
-        # Whether TTS is currently speaking
+        # True while AI/TTS is speaking
         self.speaking = False
 
-        # Used when caller interrupts TTS
+        # Caller interruption event
         self.barge_in_event = asyncio.Event()
 
-        # Stores μ-law audio chunks for one caller utterance
+        # μ-law audio chunks for current caller utterance
         self.audio_chunks: list[bytes] = []
 
 
@@ -108,7 +109,7 @@ def _mulaw_to_wav(audio_data: bytes) -> str:
     """
     Convert Twilio 8 kHz μ-law audio into a temporary WAV file.
 
-    faster-whisper can then transcribe the WAV file.
+    Whisper can then transcribe the WAV file.
     """
 
     pcm_data = audioop.ulaw2lin(audio_data, 2)
@@ -136,7 +137,7 @@ def _mulaw_to_wav(audio_data: bytes) -> str:
 
 async def _transcribe_audio(audio_data: bytes) -> str:
     """
-    Convert one complete caller utterance into text using Whisper.
+    Transcribe one complete caller utterance using Whisper.
     """
 
     if not audio_data:
@@ -147,8 +148,8 @@ async def _transcribe_audio(audio_data: bytes) -> str:
     try:
         stt = get_stt()
 
-        # Whisper is blocking.
-        # Run it outside the asyncio event loop.
+        # Whisper is blocking, so run it outside
+        # the asyncio event loop.
         text = await asyncio.to_thread(
             stt.transcribe,
             audio_path,
@@ -176,8 +177,7 @@ async def _save_message(
     """
     Save a conversation message to Supabase.
 
-    Database writes are synchronous, so they are executed
-    in a worker thread to avoid blocking the live voice pipeline.
+    Database failures must never break the live call.
     """
 
     try:
@@ -189,12 +189,45 @@ async def _save_message(
         )
 
     except Exception:
-        # Database persistence must never break the live call.
         logger.exception(
             "message_persistence_failed",
             call_sid=call_sid,
             conversation_id=conversation_id,
             role=role,
+        )
+
+
+# ================================================================
+# CLEAR TWILIO PLAYBACK
+# ================================================================
+
+async def _clear_twilio_playback(
+    websocket: WebSocket,
+    stream_sid: Optional[str],
+) -> None:
+    """
+    Tell Twilio to immediately clear queued audio.
+
+    Used when the caller interrupts AI speech.
+    """
+
+    if not stream_sid:
+        return
+
+    try:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "event": "clear",
+                    "streamSid": stream_sid,
+                }
+            )
+        )
+
+    except Exception:
+        logger.warning(
+            "failed_to_send_clear_event",
+            stream_sid=stream_sid,
         )
 
 
@@ -214,10 +247,14 @@ async def handle_media_stream(websocket: WebSocket) -> None:
     session: Optional[CallSessionState] = None
     stream_sid: Optional[str] = None
 
+<<<<<<< Updated upstream
     # Voice activity detector
+=======
+    # Voice Activity Detector
+>>>>>>> Stashed changes
     vad = VoiceActivityDetector()
 
-    # Detect end of caller sentence
+    # End-of-turn silence detector
     silence = SilenceTracker()
 
     # Text-to-speech
@@ -233,7 +270,15 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
             raw = await websocket.receive_text()
 
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+
+            except json.JSONDecodeError:
+                logger.warning(
+                    "malformed_stream_message",
+                    raw=raw[:200],
+                )
+                continue
 
             event = msg.get("event")
 
@@ -249,8 +294,7 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                 stream_sid = start_data["streamSid"]
 
-                # Twilio custom parameters are sent by
-                # /calls/incoming.
+                # Twilio custom parameters
                 custom_parameters = start_data.get(
                     "customParameters",
                     {},
@@ -280,8 +324,6 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                         call_sid=call_sid,
                     )
 
-                    # We do NOT call log_call_event here because
-                    # there is no valid internal call UUID yet.
                     break
 
                 if not call_id:
@@ -291,8 +333,6 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                         call_sid=call_sid,
                     )
 
-                    # We do NOT call log_call_event here because
-                    # there is no valid internal call UUID yet.
                     break
 
                 # ------------------------------------------------
@@ -398,12 +438,17 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                 if is_speech:
 
-                    # Caller interrupts AI speech.
+                    # Caller is speaking while AI is speaking.
                     if session.speaking:
 
                         session.barge_in_event.set()
 
-                    # Save caller audio.
+                        await _clear_twilio_playback(
+                            websocket,
+                            stream_sid,
+                        )
+
+                    # Save caller audio
                     session.audio_chunks.append(
                         mulaw_chunk
                     )
@@ -412,9 +457,8 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                 else:
 
-                    # If we already started collecting an
-                    # utterance, keep silence chunks too so
-                    # the audio remains continuous.
+                    # Keep silence chunks when an utterance
+                    # has already started.
                     if session.audio_chunks:
 
                         session.audio_chunks.append(
@@ -436,13 +480,12 @@ async def handle_media_stream(websocket: WebSocket) -> None:
                         session.audio_chunks
                     )
 
-                    # Clear before processing the turn.
                     session.audio_chunks.clear()
 
                     silence.reset()
 
                     # ------------------------------------------------
-                    # Whisper
+                    # Whisper STT
                     # ------------------------------------------------
 
                     user_text = await _transcribe_audio(
@@ -451,13 +494,27 @@ async def handle_media_stream(websocket: WebSocket) -> None:
 
                     if user_text:
 
-                        await _handle_turn(
-                            websocket=websocket,
-                            stream_sid=stream_sid,
-                            session=session,
-                            tts=tts,
-                            user_text=user_text,
-                        )
+                        # ------------------------------------------------
+                        # Handle AI turn
+                        # ------------------------------------------------
+
+                        try:
+
+                            await _handle_turn(
+                                websocket=websocket,
+                                stream_sid=stream_sid,
+                                session=session,
+                                tts=tts,
+                                user_text=user_text,
+                            )
+
+                        except asyncio.CancelledError:
+
+                            logger.info(
+                                "turn_cancelled",
+                                call_sid=session.call_sid,
+                                call_id=session.call_id,
+                            )
 
             # ====================================================
             # CALL STOP
@@ -584,11 +641,7 @@ async def _handle_turn(
     """
     Process one complete caller turn.
 
-    Flow:
-
     Caller speech
-        ↓
-    Whisper text
         ↓
     Save user message
         ↓
@@ -632,18 +685,29 @@ async def _handle_turn(
     )
 
     # ============================================================
-    # AI AGENT
+    # LANGGRAPH AGENT
     # ============================================================
 
-    agent_result = await run_agent_turn(
-        call_sid=session.call_sid,
-        caller_number=session.caller_number,
-        user_text=user_text,
-        state=session.conversation_state,
-    )
+    try:
+
+        agent_result = await run_agent_turn(
+            call_sid=session.call_sid,
+            caller_number=session.caller_number,
+            user_text=user_text,
+            state=session.conversation_state,
+        )
+
+    except asyncio.CancelledError:
+
+        await log_call_event(
+            session.call_id,
+            "turn_cancelled_barge_in",
+        )
+
+        raise
 
     # ------------------------------------------------------------
-    # Update LangGraph conversation state
+    # Update conversation state
     # ------------------------------------------------------------
 
     session.conversation_state = (
@@ -697,7 +761,7 @@ async def _handle_turn(
         ):
 
             # ----------------------------------------------------
-            # Caller started speaking while AI was talking
+            # Caller interrupted AI
             # ----------------------------------------------------
 
             if session.barge_in_event.is_set():
@@ -716,7 +780,7 @@ async def _handle_turn(
                 break
 
             # ----------------------------------------------------
-            # Send audio back to Twilio
+            # Send audio to Twilio
             # ----------------------------------------------------
 
             await websocket.send_text(
@@ -725,11 +789,9 @@ async def _handle_turn(
                         "event": "media",
                         "streamSid": stream_sid,
                         "media": {
-                            "payload": (
-                                base64.b64encode(
-                                    audio_chunk
-                                ).decode("utf-8")
-                            )
+                            "payload": base64.b64encode(
+                                audio_chunk
+                            ).decode("utf-8")
                         },
                     }
                 )
@@ -754,4 +816,23 @@ async def _handle_turn(
             "human_handoff_triggered",
             call_sid=session.call_sid,
             call_id=session.call_id,
+<<<<<<< Updated upstream
         )
+=======
+        )
+
+        try:
+
+            await asyncio.to_thread(
+                transfer_call_to_human,
+                session.call_sid,
+            )
+
+        except Exception:
+
+            logger.exception(
+                "human_handoff_failed",
+                call_sid=session.call_sid,
+                call_id=session.call_id,
+            )
+>>>>>>> Stashed changes
