@@ -281,3 +281,61 @@ def lock_key(resource: str) -> str:
         raise ValueError("resource cannot be empty.")
 
     return f"lock:{resource}"
+# ---------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------
+
+def check_phone_rate_limit(
+    phone_number: str,
+    max_requests: int,
+    window_seconds: int = 3600,
+) -> bool:
+    """
+    Check whether a phone number is allowed to make another request.
+
+    The counter is stored in Redis for a fixed time window.
+
+    Example:
+
+        rate_limit:+919876543210
+
+    Returns:
+
+        True  -> request is allowed
+        False -> request limit has been reached
+    """
+
+    if not isinstance(phone_number, str):
+        raise ValueError("phone_number must be a string.")
+
+    phone_number = phone_number.strip()
+
+    if not phone_number:
+        raise ValueError(
+            "phone_number cannot be empty."
+        )
+
+    if max_requests <= 0:
+        raise ValueError(
+            "max_requests must be greater than zero."
+        )
+
+    if window_seconds <= 0:
+        raise ValueError(
+            "window_seconds must be greater than zero."
+        )
+
+    redis = get_redis()
+
+    key = f"rate_limit:{phone_number}"
+
+    current_count = redis.incr(key)
+
+    # First request starts the one-hour window.
+    if current_count == 1:
+        redis.expire(
+            key,
+            window_seconds,
+        )
+
+    return current_count <= max_requests

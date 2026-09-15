@@ -28,8 +28,10 @@ from app.data.call_repository import (
     create_call,
     create_conversation,
 )
+from app.data.redis_client import check_phone_rate_limit
 from app.observability.call_events import log_call_event
 from app.observability.logging_config import get_logger
+from app.utils.phone import normalize_phone_number
 from app.voice.stream_handler import handle_media_stream
 
 
@@ -84,9 +86,11 @@ async def _validate_twilio_signature(
     """
     Validate that an inbound HTTP webhook genuinely came from Twilio.
 
-    If TWILIO_VALIDATE_SIGNATURE is disabled, validation is skipped.
+    If TWILIO_VALIDATE_SIGNATURE is disabled,
+    validation is skipped.
 
     Twilio signs:
+
         public URL + submitted form parameters
     """
     settings = get_settings()
@@ -162,6 +166,12 @@ async def incoming_call(
            v
         /calls/incoming
            |
+           +--> Validate Twilio signature
+           |
+           +--> Normalize caller phone
+           |
+           +--> Check phone rate limit
+           |
            +--> Create conversation
            |
            +--> Create call record
@@ -209,7 +219,7 @@ async def incoming_call(
     from_number = str(
         form.get(
             "From",
-            "unknown",
+            "",
         )
     )
 
@@ -221,31 +231,86 @@ async def incoming_call(
     )
 
     # --------------------------------------------------------
-    # 3. Create conversation record
+    # 3. Validate caller phone number
+    # --------------------------------------------------------
+
+    try:
+        normalized_from_number = normalize_phone_number(
+            from_number
+        )
+
+    except ValueError:
+        logger.warning(
+            "invalid_caller_phone_number",
+            extra={
+                "call_sid": call_sid,
+            },
+        )
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid caller phone number.",
+        )
+
+    # --------------------------------------------------------
+    # 4. Phone-based rate limiting
+    # --------------------------------------------------------
+
+    allowed = check_phone_rate_limit(
+        phone_number=normalized_from_number,
+        max_requests=settings.rate_limit_per_phone_per_hour,
+        window_seconds=3600,
+    )
+
+    if not allowed:
+        logger.warning(
+            "phone_rate_limit_exceeded",
+            extra={
+                "call_sid": call_sid,
+            },
+        )
+
+        response = VoiceResponse()
+
+        response.say(
+            "We're sorry. You have reached the maximum "
+            "number of calls allowed at this time. "
+            "Please try again later."
+        )
+
+        response.hangup()
+
+        return Response(
+            content=str(response),
+            media_type="application/xml",
+        )
+
+    # --------------------------------------------------------
+    # 5. Create conversation record
     # --------------------------------------------------------
 
     conversation = create_conversation(
-        phone_number=from_number,
+        phone_number=normalized_from_number,
         channel="voice",
     )
 
     conversation_id = conversation["id"]
 
     # --------------------------------------------------------
-    # 4. Create call record
+    # 6. Create call record
     # --------------------------------------------------------
 
     call = create_call(
         conversation_id=conversation_id,
         provider_call_id=call_sid,
-        from_number=from_number,
+        from_number=normalized_from_number,
         to_number=to_number,
     )
 
     call_id = call["id"]
 
     # --------------------------------------------------------
-    # 5. Create TwiML response
+    # 7. Create TwiML response
     # --------------------------------------------------------
 
     response = VoiceResponse()
@@ -256,13 +321,15 @@ async def incoming_call(
         url=f"wss://{_ws_host(settings.base_url)}/calls/stream"
     )
 
-    # Pass caller information to the Media Stream.
+    # Pass normalized caller information
+    # to the Media Stream.
     stream.parameter(
         name="from",
-        value=from_number,
+        value=normalized_from_number,
     )
 
-    # Pass backend database IDs to the stream handler.
+    # Pass backend database IDs
+    # to the stream handler.
     stream.parameter(
         name="conversation_id",
         value=str(conversation_id),
@@ -276,7 +343,7 @@ async def incoming_call(
     response.append(connect)
 
     # --------------------------------------------------------
-    # 6. Log incoming call
+    # 8. Log incoming call
     # --------------------------------------------------------
 
     logger.info(
@@ -289,7 +356,7 @@ async def incoming_call(
     )
 
     # --------------------------------------------------------
-    # 7. Return TwiML to Twilio
+    # 9. Return TwiML to Twilio
     # --------------------------------------------------------
 
     return Response(
@@ -377,6 +444,7 @@ async def handoff_status(
                     "dial_status": dial_status,
                 },
             )
+
         except Exception as exc:
             logger.warning(
                 "handoff_event_logging_failed",
