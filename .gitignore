@@ -1,17 +1,14 @@
 .venv/
+.venv311/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.vscode/
+.DS_Store
+
 .env
-.env.*
 !.env.example
 
-.pytest_cache/
-<<<<<<< Updated upstream
-.vscode/
-=======
-.vscode/
->>>>>>> 49a28aaedde5cc59922adf61aeac08e094d292b0
-
-.venv311/
 app_backup/
->>>>>>> Stashed changes
